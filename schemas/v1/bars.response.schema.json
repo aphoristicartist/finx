@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://finx.dev/schemas/v1/bars.response.schema.json",
+  "allOf": [
+    {
+      "$ref": "envelope.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": ["symbol", "interval", "bars"],
+          "properties": {
+            "symbol": {
+              "type": "string"
+            },
+            "interval": {
+              "type": "string",
+              "enum": ["1m", "5m", "15m", "1h", "1d"]
+            },
+            "bars": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["ts", "open", "high", "low", "close", "volume"],
+                "properties": {
+                  "ts": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "open": {
+                    "type": ["number", "string"]
+                  },
+                  "high": {
+                    "type": ["number", "string"]
+                  },
+                  "low": {
+                    "type": ["number", "string"]
+                  },
+                  "close": {
+                    "type": ["number", "string"]
+                  },
+                  "volume": {
+                    "type": ["integer", "null"],
+                    "minimum": 0
+                  },
+                  "vwap": {
+                    "type": ["number", "string", "null"]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    }
+  ]
+}

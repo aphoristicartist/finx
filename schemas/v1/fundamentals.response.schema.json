@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://finx.dev/schemas/v1/fundamentals.response.schema.json",
+  "allOf": [
+    {
+      "$ref": "envelope.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": ["fundamentals"],
+          "properties": {
+            "fundamentals": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["symbol", "as_of"],
+                "properties": {
+                  "symbol": {
+                    "type": "string"
+                  },
+                  "as_of": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "market_cap": {
+                    "type": ["number", "string", "null"]
+                  },
+                  "pe_ratio": {
+                    "type": ["number", "string", "null"]
+                  },
+                  "dividend_yield": {
+                    "type": ["number", "string", "null"]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    }
+  ]
+}

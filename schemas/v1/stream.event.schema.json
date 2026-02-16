@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://finx.dev/schemas/v1/stream.event.schema.json",
+  "type": "object",
+  "required": ["event", "seq", "ts"],
+  "properties": {
+    "event": {
+      "type": "string",
+      "enum": ["start", "progress", "chunk", "end", "error"]
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "meta": {
+      "type": "object"
+    },
+    "data": {},
+    "error": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "event": {
+            "const": "error"
+          }
+        }
+      },
+      "then": {
+        "required": ["error"]
+      }
+    }
+  ],
+  "additionalProperties": false
+}

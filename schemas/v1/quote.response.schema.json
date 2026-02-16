@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://finx.dev/schemas/v1/quote.response.schema.json",
+  "allOf": [
+    {
+      "$ref": "envelope.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "required": ["quotes"],
+          "properties": {
+            "quotes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["symbol", "price", "currency", "as_of"],
+                "properties": {
+                  "symbol": {
+                    "type": "string"
+                  },
+                  "price": {
+                    "type": ["number", "string"]
+                  },
+                  "bid": {
+                    "type": ["number", "string", "null"]
+                  },
+                  "ask": {
+                    "type": ["number", "string", "null"]
+                  },
+                  "volume": {
+                    "type": ["integer", "null"],
+                    "minimum": 0
+                  },
+                  "currency": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 3
+                  },
+                  "as_of": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    }
+  ]
+}

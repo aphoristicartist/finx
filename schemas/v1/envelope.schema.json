@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://finx.dev/schemas/v1/envelope.schema.json",
+  "title": "FinxEnvelope",
+  "type": "object",
+  "required": ["meta", "data"],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": [
+        "request_id",
+        "schema_version",
+        "generated_at",
+        "source_chain",
+        "latency_ms",
+        "cache_hit"
+      ],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "minLength": 8
+        },
+        "trace_id": {
+          "type": "string"
+        },
+        "schema_version": {
+          "type": "string",
+          "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "generated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "source_chain": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["yahoo", "polygon", "alphavantage", "alpaca"]
+          },
+          "minItems": 1
+        },
+        "latency_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cache_hit": {
+          "type": "boolean"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "data": {},
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string",
+            "enum": ["yahoo", "polygon", "alphavantage", "alpaca"]
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
