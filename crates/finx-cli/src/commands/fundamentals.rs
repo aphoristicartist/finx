@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use finx_core::{Fundamental, Symbol, UtcDateTime};
+use finx_core::{Fundamental, FundamentalsRequest, SourceRouter, SourceStrategy, Symbol};
 
 use crate::cli::FundamentalsArgs;
 use crate::error::CliError;
@@ -12,28 +12,40 @@ struct FundamentalsResponseData {
     fundamentals: Vec<Fundamental>,
 }
 
-pub fn run(args: &FundamentalsArgs) -> Result<CommandResult, CliError> {
-    let as_of = UtcDateTime::now();
-
-    let fundamentals = args
+pub fn run(
+    args: &FundamentalsArgs,
+    router: &SourceRouter,
+    strategy: &SourceStrategy,
+) -> Result<CommandResult, CliError> {
+    let symbols = args
         .symbols
         .iter()
-        .enumerate()
-        .map(|(index, raw)| {
-            let symbol = Symbol::parse(raw)?;
-            Fundamental::new(
-                symbol,
-                as_of,
-                Some(1_000_000_000.0 + (index as f64) * 100_000_000.0),
-                Some(20.0 + index as f64),
-                Some(0.015),
-            )
-        })
+        .map(|raw| Symbol::parse(raw))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let data = serde_json::to_value(FundamentalsResponseData { fundamentals })?;
+    let request =
+        FundamentalsRequest::new(symbols).map_err(|error| CliError::Command(error.to_string()))?;
 
-    Ok(CommandResult::ok(data).with_warning(
-        "fundamentals command currently returns deterministic placeholder fundamentals",
-    ))
+    match router.route_fundamentals(&request, strategy.clone()) {
+        Ok(route) => {
+            let data = serde_json::to_value(FundamentalsResponseData {
+                fundamentals: route.data.fundamentals,
+            })?;
+            Ok(CommandResult::ok(data, route.source_chain)
+                .with_errors(route.errors)
+                .with_warnings(route.warnings)
+                .with_latency(route.latency_ms)
+                .with_cache_hit(false))
+        }
+        Err(failure) => {
+            let data = serde_json::to_value(FundamentalsResponseData {
+                fundamentals: Vec::new(),
+            })?;
+            Ok(CommandResult::ok(data, failure.source_chain)
+                .with_errors(failure.errors)
+                .with_warnings(failure.warnings)
+                .with_latency(failure.latency_ms)
+                .with_cache_hit(false))
+        }
+    }
 }

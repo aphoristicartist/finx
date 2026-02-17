@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use finx_core::{Quote, Symbol, UtcDateTime};
+use finx_core::{Quote, QuoteRequest, SourceRouter, SourceStrategy, Symbol};
 
 use crate::cli::QuoteArgs;
 use crate::error::CliError;
@@ -12,30 +12,39 @@ struct QuoteResponseData {
     quotes: Vec<Quote>,
 }
 
-pub fn run(args: &QuoteArgs) -> Result<CommandResult, CliError> {
-    let as_of = UtcDateTime::now();
-
-    let quotes = args
+pub fn run(
+    args: &QuoteArgs,
+    router: &SourceRouter,
+    strategy: &SourceStrategy,
+) -> Result<CommandResult, CliError> {
+    let symbols = args
         .symbols
         .iter()
-        .enumerate()
-        .map(|(index, raw)| {
-            let symbol = Symbol::parse(raw)?;
-            let base = 100.0 + index as f64;
-            Quote::new(
-                symbol,
-                base,
-                Some(base - 0.05),
-                Some(base + 0.05),
-                Some(1_000 + (index as u64) * 10),
-                "USD",
-                as_of,
-            )
-        })
+        .map(|raw| Symbol::parse(raw))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let data = serde_json::to_value(QuoteResponseData { quotes })?;
+    let request =
+        QuoteRequest::new(symbols).map_err(|error| CliError::Command(error.to_string()))?;
 
-    Ok(CommandResult::ok(data)
-        .with_warning("quote command currently returns deterministic stub data"))
+    match router.route_quote(&request, strategy.clone()) {
+        Ok(route) => {
+            let data = serde_json::to_value(QuoteResponseData {
+                quotes: route.data.quotes,
+            })?;
+
+            Ok(CommandResult::ok(data, route.source_chain)
+                .with_errors(route.errors)
+                .with_warnings(route.warnings)
+                .with_latency(route.latency_ms)
+                .with_cache_hit(false))
+        }
+        Err(failure) => {
+            let data = serde_json::to_value(QuoteResponseData { quotes: Vec::new() })?;
+            Ok(CommandResult::ok(data, failure.source_chain)
+                .with_errors(failure.errors)
+                .with_warnings(failure.warnings)
+                .with_latency(failure.latency_ms)
+                .with_cache_hit(false))
+        }
+    }
 }

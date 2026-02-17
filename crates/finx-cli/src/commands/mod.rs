@@ -6,7 +6,7 @@ mod search;
 mod sources;
 mod sql;
 
-use finx_core::{Envelope, EnvelopeMeta, ProviderId};
+use finx_core::{Endpoint, Envelope, EnvelopeMeta, ProviderId, SourceRouter, SourceStrategy};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -19,16 +19,18 @@ pub struct CommandResult {
     pub errors: Vec<finx_core::EnvelopeError>,
     pub latency_ms: u64,
     pub cache_hit: bool,
+    pub source_chain: Vec<ProviderId>,
 }
 
 impl CommandResult {
-    pub fn ok(data: Value) -> Self {
+    pub fn ok(data: Value, source_chain: Vec<ProviderId>) -> Self {
         Self {
             data,
             warnings: Vec::new(),
             errors: Vec::new(),
             latency_ms: 0,
             cache_hit: true,
+            source_chain,
         }
     }
 
@@ -36,17 +38,42 @@ impl CommandResult {
         self.warnings.push(warning.into());
         self
     }
+
+    pub fn with_warnings(mut self, warnings: Vec<String>) -> Self {
+        self.warnings.extend(warnings);
+        self
+    }
+
+    pub fn with_errors(mut self, errors: Vec<finx_core::EnvelopeError>) -> Self {
+        self.errors.extend(errors);
+        self
+    }
+
+    pub fn with_latency(mut self, latency_ms: u64) -> Self {
+        self.latency_ms = latency_ms;
+        self
+    }
+
+    pub fn with_cache_hit(mut self, cache_hit: bool) -> Self {
+        self.cache_hit = cache_hit;
+        self
+    }
 }
 
 pub fn run(cli: &Cli) -> Result<Envelope<Value>, CliError> {
+    let router = SourceRouter::default();
+    let strategy = to_source_strategy(cli.source);
+
     let command_result = match &cli.command {
-        Command::Quote(args) => quote::run(args)?,
-        Command::Bars(args) => bars::run(args)?,
-        Command::Fundamentals(args) => fundamentals::run(args)?,
-        Command::Search(args) => search::run(args)?,
-        Command::Sql(args) => sql::run(args)?,
-        Command::Schema(args) => schema::run(args)?,
-        Command::Sources(args) => sources::run(args)?,
+        Command::Quote(args) => quote::run(args, &router, &strategy)?,
+        Command::Bars(args) => bars::run(args, &router, &strategy)?,
+        Command::Fundamentals(args) => fundamentals::run(args, &router, &strategy)?,
+        Command::Search(args) => search::run(args, &router, &strategy)?,
+        Command::Sql(args) => sql::run(args, non_provider_source_chain(&router, &strategy))?,
+        Command::Schema(args) => schema::run(args, non_provider_source_chain(&router, &strategy))?,
+        Command::Sources(args) => {
+            sources::run(args, &router, non_provider_source_chain(&router, &strategy))?
+        }
     };
 
     let CommandResult {
@@ -55,9 +82,8 @@ pub fn run(cli: &Cli) -> Result<Envelope<Value>, CliError> {
         errors,
         latency_ms,
         cache_hit,
+        source_chain,
     } = command_result;
-
-    let (source_chain, source_warnings) = resolve_sources(cli.source);
 
     let mut meta = EnvelopeMeta::new(
         Uuid::new_v4().to_string(),
@@ -77,10 +103,6 @@ pub fn run(cli: &Cli) -> Result<Envelope<Value>, CliError> {
         );
     }
 
-    for warning in source_warnings {
-        meta.push_warning(warning);
-    }
-
     for warning in warnings {
         meta.push_warning(warning);
     }
@@ -88,17 +110,16 @@ pub fn run(cli: &Cli) -> Result<Envelope<Value>, CliError> {
     Envelope::with_errors(meta, data, errors).map_err(CliError::from)
 }
 
-fn resolve_sources(source: SourceSelector) -> (Vec<ProviderId>, Vec<String>) {
+fn to_source_strategy(source: SourceSelector) -> SourceStrategy {
     match source {
-        SourceSelector::Auto => (
-            vec![ProviderId::Yahoo],
-            vec![String::from(
-                "source strategy 'auto' is stubbed to 'yahoo' until provider routing is implemented",
-            )],
-        ),
-        SourceSelector::Yahoo => (vec![ProviderId::Yahoo], Vec::new()),
-        SourceSelector::Polygon => (vec![ProviderId::Polygon], Vec::new()),
-        SourceSelector::Alphavantage => (vec![ProviderId::Alphavantage], Vec::new()),
-        SourceSelector::Alpaca => (vec![ProviderId::Alpaca], Vec::new()),
+        SourceSelector::Auto => SourceStrategy::Auto,
+        SourceSelector::Yahoo => SourceStrategy::Strict(ProviderId::Yahoo),
+        SourceSelector::Polygon => SourceStrategy::Strict(ProviderId::Polygon),
+        SourceSelector::Alphavantage => SourceStrategy::Strict(ProviderId::Alphavantage),
+        SourceSelector::Alpaca => SourceStrategy::Strict(ProviderId::Alpaca),
     }
+}
+
+fn non_provider_source_chain(router: &SourceRouter, strategy: &SourceStrategy) -> Vec<ProviderId> {
+    router.source_chain_for_strategy(Endpoint::Quote, strategy)
 }

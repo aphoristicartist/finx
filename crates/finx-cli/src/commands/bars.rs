@@ -1,13 +1,17 @@
 use std::str::FromStr;
 
-use finx_core::{Bar, BarSeries, Interval, Symbol, UtcDateTime};
+use finx_core::{BarSeries, BarsRequest, Interval, SourceRouter, SourceStrategy, Symbol};
 
 use crate::cli::BarsArgs;
 use crate::error::CliError;
 
 use super::CommandResult;
 
-pub fn run(args: &BarsArgs) -> Result<CommandResult, CliError> {
+pub fn run(
+    args: &BarsArgs,
+    router: &SourceRouter,
+    strategy: &SourceStrategy,
+) -> Result<CommandResult, CliError> {
     if args.limit == 0 {
         return Err(CliError::Command(String::from(
             "--limit must be greater than zero",
@@ -16,25 +20,27 @@ pub fn run(args: &BarsArgs) -> Result<CommandResult, CliError> {
 
     let symbol = Symbol::parse(&args.symbol)?;
     let interval = Interval::from_str(&args.interval)?;
-    let ts = UtcDateTime::now();
+    let request = BarsRequest::new(symbol.clone(), interval, args.limit)
+        .map_err(|error| CliError::Command(error.to_string()))?;
 
-    let bars = (0..args.limit)
-        .map(|index| {
-            let base = 100.0 + index as f64;
-            Bar::new(
-                ts,
-                base,
-                base + 1.0,
-                base - 1.0,
-                base + 0.25,
-                Some(5_000 + index as u64),
-                Some(base),
+    match router.route_bars(&request, strategy.clone()) {
+        Ok(route) => {
+            let data = serde_json::to_value(route.data)?;
+            Ok(CommandResult::ok(data, route.source_chain)
+                .with_errors(route.errors)
+                .with_warnings(route.warnings)
+                .with_latency(route.latency_ms)
+                .with_cache_hit(false))
+        }
+        Err(failure) => {
+            let empty_series = BarSeries::new(symbol, interval, Vec::new());
+            Ok(
+                CommandResult::ok(serde_json::to_value(empty_series)?, failure.source_chain)
+                    .with_errors(failure.errors)
+                    .with_warnings(failure.warnings)
+                    .with_latency(failure.latency_ms)
+                    .with_cache_hit(false),
             )
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let data = BarSeries::new(symbol, interval, bars);
-
-    Ok(CommandResult::ok(serde_json::to_value(data)?)
-        .with_warning("bars command currently returns synthetic placeholder bars"))
+        }
+    }
 }

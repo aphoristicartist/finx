@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use finx_core::ProviderId;
+use finx_core::{ProviderId, SourceRouter};
 
 use crate::cli::SourcesArgs;
 use crate::error::CliError;
@@ -20,25 +20,45 @@ struct SourcesResponseData {
     sources: Vec<SourceStatus>,
 }
 
-pub fn run(args: &SourcesArgs) -> Result<CommandResult, CliError> {
-    let capabilities = if args.verbose {
-        vec!["quote", "bars", "fundamentals", "search", "health"]
-    } else {
-        vec!["quote", "bars"]
-    };
-
+pub fn run(
+    args: &SourcesArgs,
+    router: &SourceRouter,
+    source_chain: Vec<ProviderId>,
+) -> Result<CommandResult, CliError> {
     let sources = ProviderId::ALL
         .into_iter()
-        .map(|id| SourceStatus {
-            id,
-            available: true,
-            status: "stub",
-            capabilities: capabilities.clone(),
+        .map(|id| match router.snapshot(id) {
+            Some(snapshot) => {
+                let capabilities = if args.verbose {
+                    snapshot.capabilities.supported_endpoints()
+                } else {
+                    let mut compact = Vec::new();
+                    if snapshot.capabilities.quote {
+                        compact.push("quote");
+                    }
+                    if snapshot.capabilities.bars {
+                        compact.push("bars");
+                    }
+                    compact
+                };
+
+                SourceStatus {
+                    id,
+                    available: snapshot.available(),
+                    status: snapshot.status_label(),
+                    capabilities,
+                }
+            }
+            None => SourceStatus {
+                id,
+                available: false,
+                status: "not_configured",
+                capabilities: Vec::new(),
+            },
         })
         .collect::<Vec<_>>();
 
     let data = serde_json::to_value(SourcesResponseData { sources })?;
 
-    Ok(CommandResult::ok(data)
-        .with_warning("source health checks are not implemented in phase 0-1"))
+    Ok(CommandResult::ok(data, source_chain))
 }

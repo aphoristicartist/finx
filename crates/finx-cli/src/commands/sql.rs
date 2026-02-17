@@ -1,6 +1,8 @@
 use serde::Serialize;
 use serde_json::Value;
 
+use finx_core::ProviderId;
+
 use crate::cli::SqlArgs;
 use crate::error::CliError;
 
@@ -21,7 +23,7 @@ struct SqlResponseData {
     truncated: bool,
 }
 
-pub fn run(args: &SqlArgs) -> Result<CommandResult, CliError> {
+pub fn run(args: &SqlArgs, source_chain: Vec<ProviderId>) -> Result<CommandResult, CliError> {
     let query = args.query.trim();
     if query.is_empty() {
         return Err(CliError::Command(String::from("query must not be empty")));
@@ -49,7 +51,7 @@ pub fn run(args: &SqlArgs) -> Result<CommandResult, CliError> {
     };
 
     Ok(
-        CommandResult::ok(serde_json::to_value(data)?).with_warning(format!(
+        CommandResult::ok(serde_json::to_value(data)?, source_chain).with_warning(format!(
             "sql execution is stubbed in phase 0-1 (query accepted, max_rows={}, timeout_ms={})",
             args.max_rows, args.query_timeout_ms
         )),

@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use finx_core::ProviderId;
 use serde::Serialize;
 
 use crate::cli::{SchemaArgs, SchemaCommand};
@@ -30,13 +31,16 @@ struct SchemaGetResponseData {
     schema: serde_json::Value,
 }
 
-pub fn run(args: &SchemaArgs) -> Result<CommandResult, CliError> {
+pub fn run(args: &SchemaArgs, source_chain: Vec<ProviderId>) -> Result<CommandResult, CliError> {
     match &args.command {
         SchemaCommand::List => {
             let data = SchemaListResponseData {
                 schemas: KNOWN_SCHEMAS.to_vec(),
             };
-            Ok(CommandResult::ok(serde_json::to_value(data)?))
+            Ok(CommandResult::ok(
+                serde_json::to_value(data)?,
+                source_chain.clone(),
+            ))
         }
         SchemaCommand::Get(get_args) => {
             let file_name = resolve_schema_file_name(&get_args.name);
@@ -58,7 +62,7 @@ pub fn run(args: &SchemaArgs) -> Result<CommandResult, CliError> {
                 schema,
             };
 
-            Ok(CommandResult::ok(serde_json::to_value(data)?))
+            Ok(CommandResult::ok(serde_json::to_value(data)?, source_chain))
         }
     }
 }

@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use finx_core::{AssetClass, Instrument, Symbol};
+use finx_core::{Instrument, SearchRequest, SourceRouter, SourceStrategy};
 
 use crate::cli::SearchArgs;
 use crate::error::CliError;
@@ -13,7 +13,11 @@ struct SearchResponseData {
     results: Vec<Instrument>,
 }
 
-pub fn run(args: &SearchArgs) -> Result<CommandResult, CliError> {
+pub fn run(
+    args: &SearchArgs,
+    router: &SourceRouter,
+    strategy: &SourceStrategy,
+) -> Result<CommandResult, CliError> {
     if args.limit == 0 {
         return Err(CliError::Command(String::from(
             "--limit must be greater than zero",
@@ -25,52 +29,31 @@ pub fn run(args: &SearchArgs) -> Result<CommandResult, CliError> {
         return Err(CliError::Command(String::from("query must not be empty")));
     }
 
-    let catalog = vec![
-        Instrument::new(
-            Symbol::parse("AAPL")?,
-            "Apple Inc.",
-            Some(String::from("NASDAQ")),
-            "USD",
-            AssetClass::Equity,
-            true,
-        )?,
-        Instrument::new(
-            Symbol::parse("MSFT")?,
-            "Microsoft Corporation",
-            Some(String::from("NASDAQ")),
-            "USD",
-            AssetClass::Equity,
-            true,
-        )?,
-        Instrument::new(
-            Symbol::parse("SPY")?,
-            "SPDR S&P 500 ETF Trust",
-            Some(String::from("ARCA")),
-            "USD",
-            AssetClass::Etf,
-            true,
-        )?,
-    ];
+    let request = SearchRequest::new(query, args.limit)
+        .map_err(|error| CliError::Command(error.to_string()))?;
 
-    let query_lower = query.to_ascii_lowercase();
-    let results = catalog
-        .into_iter()
-        .filter(|instrument| {
-            instrument
-                .symbol
-                .as_str()
-                .to_ascii_lowercase()
-                .contains(&query_lower)
-                || instrument.name.to_ascii_lowercase().contains(&query_lower)
-        })
-        .take(args.limit)
-        .collect::<Vec<_>>();
-
-    let data = serde_json::to_value(SearchResponseData {
-        query: query.to_owned(),
-        results,
-    })?;
-
-    Ok(CommandResult::ok(data)
-        .with_warning("search currently uses a static in-memory catalog in phase 0-1"))
+    match router.route_search(&request, strategy.clone()) {
+        Ok(route) => {
+            let data = serde_json::to_value(SearchResponseData {
+                query: route.data.query,
+                results: route.data.results,
+            })?;
+            Ok(CommandResult::ok(data, route.source_chain)
+                .with_errors(route.errors)
+                .with_warnings(route.warnings)
+                .with_latency(route.latency_ms)
+                .with_cache_hit(false))
+        }
+        Err(failure) => {
+            let data = serde_json::to_value(SearchResponseData {
+                query: query.to_owned(),
+                results: Vec::new(),
+            })?;
+            Ok(CommandResult::ok(data, failure.source_chain)
+                .with_errors(failure.errors)
+                .with_warnings(failure.warnings)
+                .with_latency(failure.latency_ms)
+                .with_cache_hit(false))
+        }
+    }
 }
