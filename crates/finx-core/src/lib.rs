@@ -34,3 +34,7 @@ pub use routing::{
     RouteFailure, RouteResult, RouteSuccess, SourceRouter, SourceSnapshot, SourceStrategy,
 };
 pub use source::ProviderId;
+pub use finx_warehouse::{
+    BarRecord, CacheSyncReport, FundamentalRecord, QueryGuardrails, QueryResult, QuoteRecord,
+    SqlColumn, Warehouse, WarehouseConfig, WarehouseError,
+};

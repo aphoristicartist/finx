@@ -6,6 +6,7 @@ use crate::cli::BarsArgs;
 use crate::error::CliError;
 
 use super::CommandResult;
+use super::warehouse_sync;
 
 pub async fn run(
     args: &BarsArgs,
@@ -25,12 +26,26 @@ pub async fn run(
 
     match router.route_bars(&request, strategy.clone()).await {
         Ok(route) => {
-            let data = serde_json::to_value(route.data)?;
-            Ok(CommandResult::ok(data, route.source_chain)
+            let series = route.data;
+            let warehouse_warning = warehouse_sync::sync_bars(
+                route.selected_source,
+                series.interval,
+                series.bars.as_slice(),
+                series.symbol.as_str(),
+                route.latency_ms,
+            )
+            .err()
+            .map(|error| format!("warehouse sync (bars) failed: {error}"));
+            let data = serde_json::to_value(series)?;
+            let mut result = CommandResult::ok(data, route.source_chain)
                 .with_errors(route.errors)
                 .with_warnings(route.warnings)
                 .with_latency(route.latency_ms)
-                .with_cache_hit(false))
+                .with_cache_hit(false);
+            if let Some(warning) = warehouse_warning {
+                result = result.with_warning(warning);
+            }
+            Ok(result)
         }
         Err(failure) => {
             let empty_series = BarSeries::new(symbol, interval, Vec::new());

@@ -6,6 +6,7 @@ use crate::cli::QuoteArgs;
 use crate::error::CliError;
 
 use super::CommandResult;
+use super::warehouse_sync;
 
 #[derive(Debug, Serialize)]
 struct QuoteResponseData {
@@ -28,15 +29,24 @@ pub async fn run(
 
     match router.route_quote(&request, strategy.clone()).await {
         Ok(route) => {
+            let quotes = route.data.quotes;
+            let warehouse_warning =
+                warehouse_sync::sync_quotes(route.selected_source, quotes.as_slice(), route.latency_ms)
+                    .err()
+                    .map(|error| format!("warehouse sync (quote) failed: {error}"));
             let data = serde_json::to_value(QuoteResponseData {
-                quotes: route.data.quotes,
+                quotes,
             })?;
 
-            Ok(CommandResult::ok(data, route.source_chain)
+            let mut result = CommandResult::ok(data, route.source_chain)
                 .with_errors(route.errors)
                 .with_warnings(route.warnings)
                 .with_latency(route.latency_ms)
-                .with_cache_hit(false))
+                .with_cache_hit(false);
+            if let Some(warning) = warehouse_warning {
+                result = result.with_warning(warning);
+            }
+            Ok(result)
         }
         Err(failure) => {
             let data = serde_json::to_value(QuoteResponseData { quotes: Vec::new() })?;

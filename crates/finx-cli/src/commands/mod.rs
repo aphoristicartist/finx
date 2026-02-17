@@ -1,10 +1,12 @@
 mod bars;
+mod cache;
 mod fundamentals;
 mod quote;
 mod schema;
 mod search;
 mod sources;
 mod sql;
+mod warehouse_sync;
 
 use finx_core::{Endpoint, Envelope, EnvelopeMeta, ProviderId, SourceRouter, SourceStrategy};
 use serde_json::Value;
@@ -71,6 +73,9 @@ pub async fn run(cli: &Cli) -> Result<Envelope<Value>, CliError> {
         Command::Search(args) => search::run(args, &router, &strategy).await?,
         Command::Sql(args) => {
             sql::run(args, non_provider_source_chain(&router, &strategy).await)?
+        }
+        Command::Cache(args) => {
+            cache::run(args, non_provider_source_chain(&router, &strategy).await)?
         }
         Command::Schema(args) => {
             schema::run(args, non_provider_source_chain(&router, &strategy).await)?

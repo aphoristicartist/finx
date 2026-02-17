@@ -2,6 +2,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use finx_core::ProviderId;
+use finx_warehouse::{QueryGuardrails, Warehouse};
 
 use crate::cli::SqlArgs;
 use crate::error::CliError;
@@ -29,31 +30,44 @@ pub fn run(args: &SqlArgs, source_chain: Vec<ProviderId>) -> Result<CommandResul
         return Err(CliError::Command(String::from("query must not be empty")));
     }
 
-    let rows = vec![vec![
-        Value::String(String::from("placeholder")),
-        Value::Number(1.into()),
-    ]];
+    // Open warehouse
+    let warehouse = Warehouse::open_default()
+        .map_err(|e| CliError::Command(format!("failed to open warehouse: {}", e)))?;
 
-    let data = SqlResponseData {
-        columns: vec![
-            SqlColumn {
-                name: String::from("status"),
-                r#type: String::from("TEXT"),
-            },
-            SqlColumn {
-                name: String::from("value"),
-                r#type: String::from("BIGINT"),
-            },
-        ],
-        row_count: rows.len(),
-        rows,
-        truncated: false,
+    // Execute query with guardrails
+    let guardrails = QueryGuardrails {
+        max_rows: args.max_rows,
+        query_timeout_ms: args.query_timeout_ms,
     };
 
-    Ok(
-        CommandResult::ok(serde_json::to_value(data)?, source_chain).with_warning(format!(
-            "sql execution is stubbed in phase 0-1 (query accepted, max_rows={}, timeout_ms={})",
-            args.max_rows, args.query_timeout_ms
-        )),
-    )
+    let result = warehouse
+        .execute_query(query, guardrails, args.write)
+        .map_err(|e| CliError::Command(format!("query execution failed: {}", e)))?;
+
+    // Transform result into response format
+    let data = SqlResponseData {
+        columns: result
+            .columns
+            .into_iter()
+            .map(|col| SqlColumn {
+                name: col.name,
+                r#type: col.r#type,
+            })
+            .collect(),
+        rows: result.rows,
+        row_count: result.row_count,
+        truncated: result.truncated,
+    };
+
+    let mut command_result = CommandResult::ok(serde_json::to_value(&data)?, source_chain);
+
+    // Add warning if results were truncated
+    if data.truncated {
+        command_result = command_result.with_warning(format!(
+            "result truncated at {} rows (use --max-rows to increase limit)",
+            data.row_count
+        ));
+    }
+
+    Ok(command_result)
 }

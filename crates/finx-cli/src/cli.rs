@@ -72,8 +72,11 @@ pub enum Command {
     /// Search instruments.
     Search(SearchArgs),
 
-    /// Run local SQL query (stub in this phase).
+    /// Run local SQL query against the DuckDB warehouse.
     Sql(SqlArgs),
+
+    /// Cache management commands.
+    Cache(CacheArgs),
 
     /// Inspect bundled schemas.
     Schema(SchemaArgs),
@@ -125,6 +128,10 @@ pub struct SqlArgs {
     /// SQL text.
     pub query: String,
 
+    /// Allow write statements (INSERT/UPDATE/CREATE/DELETE).
+    #[arg(long, default_value_t = false)]
+    pub write: bool,
+
     /// Maximum row count.
     #[arg(long, default_value_t = 10_000)]
     pub max_rows: usize,
@@ -132,6 +139,18 @@ pub struct SqlArgs {
     /// Query timeout in milliseconds.
     #[arg(long, default_value_t = 5_000)]
     pub query_timeout_ms: u64,
+}
+
+#[derive(Debug, Args)]
+pub struct CacheArgs {
+    #[command(subcommand)]
+    pub command: CacheCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CacheCommand {
+    /// Sync local Parquet cache partitions into warehouse metadata.
+    Sync,
 }
 
 #[derive(Debug, Args)]

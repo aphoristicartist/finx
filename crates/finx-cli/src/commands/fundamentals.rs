@@ -6,6 +6,7 @@ use crate::cli::FundamentalsArgs;
 use crate::error::CliError;
 
 use super::CommandResult;
+use super::warehouse_sync;
 
 #[derive(Debug, Serialize)]
 struct FundamentalsResponseData {
@@ -28,14 +29,27 @@ pub async fn run(
 
     match router.route_fundamentals(&request, strategy.clone()).await {
         Ok(route) => {
+            let fundamentals = route.data.fundamentals;
+            let warehouse_warning = warehouse_sync::sync_fundamentals(
+                route.selected_source,
+                fundamentals.as_slice(),
+                route.latency_ms,
+            )
+            .err()
+            .map(|error| format!("warehouse sync (fundamentals) failed: {error}"));
             let data = serde_json::to_value(FundamentalsResponseData {
-                fundamentals: route.data.fundamentals,
+                fundamentals,
             })?;
-            Ok(CommandResult::ok(data, route.source_chain)
+
+            let mut result = CommandResult::ok(data, route.source_chain)
                 .with_errors(route.errors)
                 .with_warnings(route.warnings)
                 .with_latency(route.latency_ms)
-                .with_cache_hit(false))
+                .with_cache_hit(false);
+            if let Some(warning) = warehouse_warning {
+                result = result.with_warning(warning);
+            }
+            Ok(result)
         }
         Err(failure) => {
             let data = serde_json::to_value(FundamentalsResponseData {

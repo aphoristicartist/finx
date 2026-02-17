@@ -7,6 +7,8 @@ rust-version.workspace = true
 description = "Core domain contracts and envelopes for finx"
 
 [dependencies]
+duckdb.workspace = true
+finx-warehouse = { path = "../finx-warehouse" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
