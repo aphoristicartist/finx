@@ -23,11 +23,13 @@ pub enum CliError {
 }
 
 impl CliError {
-    pub const fn exit_code(&self) -> i32 {
+    pub const fn exit_code(&self) -> u8 {
         match self {
             Self::Validation(_) => 2,
+            Self::Command(_) => 2,
             Self::StrictModeViolation { .. } => 5,
-            Self::Command(_) | Self::Serialization(_) | Self::Io(_) => 10,
+            Self::Serialization(_) => 4,
+            Self::Io(_) => 10,
         }
     }
 }

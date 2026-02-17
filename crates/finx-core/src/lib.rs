@@ -7,14 +7,17 @@
 //! - Data source traits/adapters and routing
 
 pub mod adapters;
+pub mod circuit_breaker;
 pub mod data_source;
 pub mod domain;
 pub mod envelope;
 pub mod error;
+pub mod http_client;
 pub mod routing;
 pub mod source;
 
 pub use adapters::{PolygonAdapter, YahooAdapter};
+pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitState};
 pub use data_source::{
     BarsRequest, CapabilitySet, DataSource, Endpoint, FundamentalsBatch, FundamentalsRequest,
     HealthState, HealthStatus, QuoteBatch, QuoteRequest, SearchBatch, SearchRequest, SourceError,
@@ -26,6 +29,7 @@ pub use domain::{
 };
 pub use envelope::{Envelope, EnvelopeError, EnvelopeMeta};
 pub use error::{CoreError, ValidationError};
+pub use http_client::{HttpAuth, HttpClient, HttpError, HttpMethod, HttpRequest, HttpResponse, NoopHttpClient};
 pub use routing::{
     RouteFailure, RouteResult, RouteSuccess, SourceRouter, SourceSnapshot, SourceStrategy,
 };

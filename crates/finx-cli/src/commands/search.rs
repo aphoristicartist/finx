@@ -13,7 +13,7 @@ struct SearchResponseData {
     results: Vec<Instrument>,
 }
 
-pub fn run(
+pub async fn run(
     args: &SearchArgs,
     router: &SourceRouter,
     strategy: &SourceStrategy,
@@ -32,7 +32,7 @@ pub fn run(
     let request = SearchRequest::new(query, args.limit)
         .map_err(|error| CliError::Command(error.to_string()))?;
 
-    match router.route_search(&request, strategy.clone()) {
+    match router.route_search(&request, strategy.clone()).await {
         Ok(route) => {
             let data = serde_json::to_value(SearchResponseData {
                 query: route.data.query,

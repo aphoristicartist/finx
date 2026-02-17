@@ -1,4 +1,6 @@
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -76,6 +78,8 @@ pub struct SourceRouter {
     adapters: HashMap<ProviderId, Arc<dyn DataSource>>,
 }
 
+type InvokeFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, SourceError>> + Send + 'a>>;
+
 impl Default for SourceRouter {
     fn default() -> Self {
         Self::new(vec![
@@ -94,72 +98,86 @@ impl SourceRouter {
         Self { adapters }
     }
 
-    pub fn source_chain_for_strategy(
+    pub async fn source_chain_for_strategy(
         &self,
         endpoint: Endpoint,
         strategy: &SourceStrategy,
     ) -> Vec<ProviderId> {
-        let mut chain = self.plan_sources(endpoint, strategy);
+        let mut chain = self.plan_sources(endpoint, strategy).await;
         if chain.is_empty() {
             chain = self.sorted_registered_sources();
         }
         chain
     }
 
-    pub fn snapshot(&self, provider: ProviderId) -> Option<SourceSnapshot> {
+    pub async fn snapshot(&self, provider: ProviderId) -> Option<SourceSnapshot> {
         let adapter = self.adapters.get(&provider)?;
         Some(SourceSnapshot {
             id: provider,
             capabilities: adapter.capabilities(),
-            health: adapter.health(),
+            health: adapter.health().await,
         })
     }
 
-    pub fn route_quote(
+    pub async fn route_quote(
         &self,
         req: &QuoteRequest,
         strategy: SourceStrategy,
     ) -> RouteResult<QuoteBatch> {
-        self.route_endpoint(Endpoint::Quote, strategy, |source| source.quote(req))
+        let req = req.clone();
+        self.route_endpoint(Endpoint::Quote, strategy, move |source| {
+            source.quote(req.clone())
+        })
+            .await
     }
 
-    pub fn route_bars(
+    pub async fn route_bars(
         &self,
         req: &BarsRequest,
         strategy: SourceStrategy,
     ) -> RouteResult<BarSeries> {
-        self.route_endpoint(Endpoint::Bars, strategy, |source| source.bars(req))
+        let req = req.clone();
+        self.route_endpoint(Endpoint::Bars, strategy, move |source| {
+            source.bars(req.clone())
+        })
+            .await
     }
 
-    pub fn route_fundamentals(
+    pub async fn route_fundamentals(
         &self,
         req: &FundamentalsRequest,
         strategy: SourceStrategy,
     ) -> RouteResult<FundamentalsBatch> {
-        self.route_endpoint(Endpoint::Fundamentals, strategy, |source| {
-            source.fundamentals(req)
+        let req = req.clone();
+        self.route_endpoint(Endpoint::Fundamentals, strategy, move |source| {
+            source.fundamentals(req.clone())
         })
+            .await
     }
 
-    pub fn route_search(
+    pub async fn route_search(
         &self,
         req: &SearchRequest,
         strategy: SourceStrategy,
     ) -> RouteResult<SearchBatch> {
-        self.route_endpoint(Endpoint::Search, strategy, |source| source.search(req))
+        let req = req.clone();
+        self.route_endpoint(Endpoint::Search, strategy, move |source| {
+            source.search(req.clone())
+        })
+            .await
     }
 
-    fn route_endpoint<T, F>(
+    async fn route_endpoint<T, F>(
         &self,
         endpoint: Endpoint,
         strategy: SourceStrategy,
         mut invoke: F,
     ) -> RouteResult<T>
     where
-        F: FnMut(&dyn DataSource) -> Result<T, SourceError>,
+        F: for<'a> FnMut(&'a dyn DataSource) -> InvokeFuture<'a, T>,
     {
         let started = Instant::now();
-        let planned_chain = self.plan_sources(endpoint, &strategy);
+        let planned_chain = self.plan_sources(endpoint, &strategy).await;
         let mut source_chain = Vec::with_capacity(planned_chain.len());
         let mut errors = Vec::new();
 
@@ -187,7 +205,7 @@ impl SourceRouter {
                 continue;
             }
 
-            let health = adapter.health();
+            let health = adapter.health().await;
             if health.state == HealthState::Unhealthy {
                 errors.push(to_envelope_error(
                     provider,
@@ -210,7 +228,7 @@ impl SourceRouter {
                 continue;
             }
 
-            match invoke(adapter.as_ref()) {
+            match invoke(adapter.as_ref()).await {
                 Ok(data) => {
                     let mut warnings = Vec::new();
                     if !errors.is_empty() {
@@ -240,7 +258,7 @@ impl SourceRouter {
         }
 
         if source_chain.is_empty() {
-            source_chain = self.source_chain_for_strategy(endpoint, &strategy);
+            source_chain = self.source_chain_for_strategy(endpoint, &strategy).await;
         }
         if source_chain.is_empty() {
             source_chain = self.sorted_registered_sources();
@@ -264,36 +282,32 @@ impl SourceRouter {
         })
     }
 
-    fn plan_sources(&self, endpoint: Endpoint, strategy: &SourceStrategy) -> Vec<ProviderId> {
+    async fn plan_sources(&self, endpoint: Endpoint, strategy: &SourceStrategy) -> Vec<ProviderId> {
         match strategy {
-            SourceStrategy::Auto => self.auto_chain(endpoint),
+            SourceStrategy::Auto => self.auto_chain(endpoint).await,
             SourceStrategy::Priority(priority) => dedupe_chain(priority),
             SourceStrategy::Strict(provider) => vec![*provider],
         }
     }
 
-    fn auto_chain(&self, endpoint: Endpoint) -> Vec<ProviderId> {
-        let mut scored = self
-            .adapters
-            .iter()
-            .map(|(provider, source)| {
-                let capabilities = source.capabilities();
-                let health = source.health();
-                let supports_endpoint = capabilities.supports(endpoint);
+    async fn auto_chain(&self, endpoint: Endpoint) -> Vec<ProviderId> {
+        let mut scored = Vec::with_capacity(self.adapters.len());
+        for (provider, source) in &self.adapters {
+            let capabilities = source.capabilities();
+            let health = source.health().await;
+            let supports_endpoint = capabilities.supports(endpoint);
 
-                let endpoint_score = if supports_endpoint { 1_000 } else { 0 };
-                let health_score = match health.state {
-                    HealthState::Healthy => 250,
-                    HealthState::Degraded => 100,
-                    HealthState::Unhealthy => 0,
-                };
-                let rate_score = if health.rate_available { 150 } else { 0 };
-                let total_score =
-                    endpoint_score + health_score + rate_score + i32::from(health.score);
+            let endpoint_score = if supports_endpoint { 1_000 } else { 0 };
+            let health_score = match health.state {
+                HealthState::Healthy => 250,
+                HealthState::Degraded => 100,
+                HealthState::Unhealthy => 0,
+            };
+            let rate_score = if health.rate_available { 150 } else { 0 };
+            let total_score = endpoint_score + health_score + rate_score + i32::from(health.score);
 
-                (*provider, total_score)
-            })
-            .collect::<Vec<_>>();
+            scored.push((*provider, total_score));
+        }
 
         scored.sort_by(|left, right| {
             right
@@ -340,6 +354,8 @@ fn elapsed_ms(started: Instant) -> u64 {
 mod tests {
     use super::*;
     use crate::Symbol;
+    use std::future::Future;
+    use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
     #[test]
     fn auto_prefers_polygon_for_quote_when_available() {
@@ -347,8 +363,7 @@ mod tests {
         let request = QuoteRequest::new(vec![Symbol::parse("AAPL").expect("valid symbol")])
             .expect("valid request");
 
-        let result = router
-            .route_quote(&request, SourceStrategy::Auto)
+        let result = block_on(router.route_quote(&request, SourceStrategy::Auto))
             .expect("route should succeed");
 
         assert_eq!(result.selected_source, ProviderId::Polygon);
@@ -366,8 +381,7 @@ mod tests {
         ])
         .expect("valid request");
 
-        let result = router
-            .route_quote(&request, SourceStrategy::Auto)
+        let result = block_on(router.route_quote(&request, SourceStrategy::Auto))
             .expect("route should succeed with fallback");
 
         assert_eq!(result.selected_source, ProviderId::Yahoo);
@@ -390,11 +404,53 @@ mod tests {
         ])
         .expect("valid request");
 
-        let result = router.route_quote(&request, SourceStrategy::Strict(ProviderId::Polygon));
+        let result = block_on(router.route_quote(&request, SourceStrategy::Strict(ProviderId::Polygon)));
 
         let failure = result.expect_err("strict route should fail");
         assert_eq!(failure.source_chain, vec![ProviderId::Polygon]);
         assert_eq!(failure.errors.len(), 1);
         assert_eq!(failure.errors[0].source, Some(ProviderId::Polygon));
     }
+
+    fn block_on<F>(future: F) -> F::Output
+    where
+        F: Future,
+    {
+        let waker = noop_waker();
+        let mut context = Context::from_waker(&waker);
+        let mut future = std::pin::pin!(future);
+
+        loop {
+            match future.as_mut().poll(&mut context) {
+                Poll::Ready(output) => return output,
+                Poll::Pending => std::thread::yield_now(),
+            }
+        }
+    }
+
+    fn noop_waker() -> Waker {
+        // SAFETY: The vtable functions never dereference the data pointer and are no-op operations.
+        unsafe { Waker::from_raw(noop_raw_waker()) }
+    }
+
+    fn noop_raw_waker() -> RawWaker {
+        RawWaker::new(std::ptr::null(), &NOOP_RAW_WAKER_VTABLE)
+    }
+
+    unsafe fn noop_raw_waker_clone(_: *const ()) -> RawWaker {
+        noop_raw_waker()
+    }
+
+    unsafe fn noop_raw_waker_wake(_: *const ()) {}
+
+    unsafe fn noop_raw_waker_wake_by_ref(_: *const ()) {}
+
+    unsafe fn noop_raw_waker_drop(_: *const ()) {}
+
+    static NOOP_RAW_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
+        noop_raw_waker_clone,
+        noop_raw_waker_wake,
+        noop_raw_waker_wake_by_ref,
+        noop_raw_waker_drop,
+    );
 }

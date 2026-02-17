@@ -12,7 +12,7 @@ struct FundamentalsResponseData {
     fundamentals: Vec<Fundamental>,
 }
 
-pub fn run(
+pub async fn run(
     args: &FundamentalsArgs,
     router: &SourceRouter,
     strategy: &SourceStrategy,
@@ -26,7 +26,7 @@ pub fn run(
     let request =
         FundamentalsRequest::new(symbols).map_err(|error| CliError::Command(error.to_string()))?;
 
-    match router.route_fundamentals(&request, strategy.clone()) {
+    match router.route_fundamentals(&request, strategy.clone()).await {
         Ok(route) => {
             let data = serde_json::to_value(FundamentalsResponseData {
                 fundamentals: route.data.fundamentals,

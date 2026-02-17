@@ -60,19 +60,24 @@ impl CommandResult {
     }
 }
 
-pub fn run(cli: &Cli) -> Result<Envelope<Value>, CliError> {
+pub async fn run(cli: &Cli) -> Result<Envelope<Value>, CliError> {
     let router = SourceRouter::default();
     let strategy = to_source_strategy(cli.source);
 
     let command_result = match &cli.command {
-        Command::Quote(args) => quote::run(args, &router, &strategy)?,
-        Command::Bars(args) => bars::run(args, &router, &strategy)?,
-        Command::Fundamentals(args) => fundamentals::run(args, &router, &strategy)?,
-        Command::Search(args) => search::run(args, &router, &strategy)?,
-        Command::Sql(args) => sql::run(args, non_provider_source_chain(&router, &strategy))?,
-        Command::Schema(args) => schema::run(args, non_provider_source_chain(&router, &strategy))?,
+        Command::Quote(args) => quote::run(args, &router, &strategy).await?,
+        Command::Bars(args) => bars::run(args, &router, &strategy).await?,
+        Command::Fundamentals(args) => fundamentals::run(args, &router, &strategy).await?,
+        Command::Search(args) => search::run(args, &router, &strategy).await?,
+        Command::Sql(args) => {
+            sql::run(args, non_provider_source_chain(&router, &strategy).await)?
+        }
+        Command::Schema(args) => {
+            schema::run(args, non_provider_source_chain(&router, &strategy).await)?
+        }
         Command::Sources(args) => {
-            sources::run(args, &router, non_provider_source_chain(&router, &strategy))?
+            sources::run(args, &router, non_provider_source_chain(&router, &strategy).await)
+                .await?
         }
     };
 
@@ -120,6 +125,9 @@ fn to_source_strategy(source: SourceSelector) -> SourceStrategy {
     }
 }
 
-fn non_provider_source_chain(router: &SourceRouter, strategy: &SourceStrategy) -> Vec<ProviderId> {
-    router.source_chain_for_strategy(Endpoint::Quote, strategy)
+async fn non_provider_source_chain(
+    router: &SourceRouter,
+    strategy: &SourceStrategy,
+) -> Vec<ProviderId> {
+    router.source_chain_for_strategy(Endpoint::Quote, strategy).await
 }

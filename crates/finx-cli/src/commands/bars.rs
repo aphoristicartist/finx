@@ -7,7 +7,7 @@ use crate::error::CliError;
 
 use super::CommandResult;
 
-pub fn run(
+pub async fn run(
     args: &BarsArgs,
     router: &SourceRouter,
     strategy: &SourceStrategy,
@@ -23,7 +23,7 @@ pub fn run(
     let request = BarsRequest::new(symbol.clone(), interval, args.limit)
         .map_err(|error| CliError::Command(error.to_string()))?;
 
-    match router.route_bars(&request, strategy.clone()) {
+    match router.route_bars(&request, strategy.clone()).await {
         Ok(route) => {
             let data = serde_json::to_value(route.data)?;
             Ok(CommandResult::ok(data, route.source_chain)

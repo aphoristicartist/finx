@@ -12,7 +12,7 @@ struct QuoteResponseData {
     quotes: Vec<Quote>,
 }
 
-pub fn run(
+pub async fn run(
     args: &QuoteArgs,
     router: &SourceRouter,
     strategy: &SourceStrategy,
@@ -26,7 +26,7 @@ pub fn run(
     let request =
         QuoteRequest::new(symbols).map_err(|error| CliError::Command(error.to_string()))?;
 
-    match router.route_quote(&request, strategy.clone()) {
+    match router.route_quote(&request, strategy.clone()).await {
         Ok(route) => {
             let data = serde_json::to_value(QuoteResponseData {
                 quotes: route.data.quotes,

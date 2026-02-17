@@ -1,4 +1,6 @@
 use std::fmt::{Display, Formatter};
+use std::future::Future;
+use std::pin::Pin;
 
 use serde::{Deserialize, Serialize};
 
@@ -321,9 +323,21 @@ pub struct SearchBatch {
 pub trait DataSource: Send + Sync {
     fn id(&self) -> ProviderId;
     fn capabilities(&self) -> CapabilitySet;
-    fn quote(&self, req: &QuoteRequest) -> Result<QuoteBatch, SourceError>;
-    fn bars(&self, req: &BarsRequest) -> Result<BarSeries, SourceError>;
-    fn fundamentals(&self, req: &FundamentalsRequest) -> Result<FundamentalsBatch, SourceError>;
-    fn search(&self, req: &SearchRequest) -> Result<SearchBatch, SourceError>;
-    fn health(&self) -> HealthStatus;
+    fn quote<'a>(
+        &'a self,
+        req: QuoteRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<QuoteBatch, SourceError>> + Send + 'a>>;
+    fn bars<'a>(
+        &'a self,
+        req: BarsRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<BarSeries, SourceError>> + Send + 'a>>;
+    fn fundamentals<'a>(
+        &'a self,
+        req: FundamentalsRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<FundamentalsBatch, SourceError>> + Send + 'a>>;
+    fn search<'a>(
+        &'a self,
+        req: SearchRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<SearchBatch, SourceError>> + Send + 'a>>;
+    fn health<'a>(&'a self) -> Pin<Box<dyn Future<Output = HealthStatus> + Send + 'a>>;
 }

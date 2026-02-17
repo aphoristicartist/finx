@@ -43,16 +43,8 @@ pub fn run(args: &SchemaArgs, source_chain: Vec<ProviderId>) -> Result<CommandRe
             ))
         }
         SchemaCommand::Get(get_args) => {
-            let file_name = resolve_schema_file_name(&get_args.name);
-            let path = PathBuf::from(SCHEMA_DIR).join(&file_name);
-
-            if !path_exists(&path) {
-                return Err(CliError::Command(format!(
-                    "schema '{}' not found under {}",
-                    get_args.name, SCHEMA_DIR
-                )));
-            }
-
+            let file_name = resolve_schema_file_name(&get_args.name)?;
+            let path = resolve_schema_path(&file_name, &get_args.name)?;
             let content = fs::read_to_string(&path)?;
             let schema = serde_json::from_str::<serde_json::Value>(&content)?;
 
@@ -67,9 +59,9 @@ pub fn run(args: &SchemaArgs, source_chain: Vec<ProviderId>) -> Result<CommandRe
     }
 }
 
-fn resolve_schema_file_name(input: &str) -> String {
+fn resolve_schema_file_name(input: &str) -> Result<String, CliError> {
     let normalized = input.trim().to_ascii_lowercase();
-    match normalized.as_str() {
+    let file_name = match normalized.as_str() {
         "envelope" => String::from("envelope.schema.json"),
         "quote" => String::from("quote.response.schema.json"),
         "bars" => String::from("bars.response.schema.json"),
@@ -78,9 +70,47 @@ fn resolve_schema_file_name(input: &str) -> String {
         "stream" | "stream-event" => String::from("stream.event.schema.json"),
         other if other.ends_with(".json") => other.to_owned(),
         other => format!("{other}.schema.json"),
+    };
+
+    if !is_safe_schema_file_name(&file_name) {
+        return Err(CliError::Command(format!(
+            "invalid schema name '{}'",
+            input.trim()
+        )));
     }
+
+    Ok(file_name)
 }
 
-fn path_exists(path: &Path) -> bool {
-    path.exists() && path.is_file()
+fn resolve_schema_path(file_name: &str, original_name: &str) -> Result<PathBuf, CliError> {
+    let schema_root = fs::canonicalize(SCHEMA_DIR)?;
+    let candidate = schema_root.join(file_name);
+
+    if !candidate.exists() || !candidate.is_file() {
+        return Err(CliError::Command(format!(
+            "schema '{}' not found under {}",
+            original_name, SCHEMA_DIR
+        )));
+    }
+
+    let canonical_candidate = fs::canonicalize(&candidate)?;
+    if !canonical_candidate.starts_with(&schema_root) {
+        return Err(CliError::Command(format!(
+            "schema '{}' resolves outside {}",
+            original_name, SCHEMA_DIR
+        )));
+    }
+
+    Ok(canonical_candidate)
+}
+
+fn is_safe_schema_file_name(file_name: &str) -> bool {
+    if file_name.is_empty() {
+        return false;
+    }
+
+    let path = Path::new(file_name);
+    path.components().count() == 1
+        && path.file_name().and_then(|name| name.to_str()) == Some(file_name)
+        && file_name.ends_with(".json")
 }
