@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::adapters::{PolygonAdapter, YahooAdapter};
+use crate::adapters::{AlpacaAdapter, AlphaVantageAdapter, PolygonAdapter, YahooAdapter};
 use crate::data_source::{
     BarsRequest, CapabilitySet, DataSource, Endpoint, FundamentalsBatch, FundamentalsRequest,
     HealthState, HealthStatus, QuoteBatch, QuoteRequest, SearchBatch, SearchRequest, SourceError,
@@ -84,6 +84,8 @@ impl Default for SourceRouter {
     fn default() -> Self {
         Self::new(vec![
             Arc::new(PolygonAdapter::default()),
+            Arc::new(AlpacaAdapter::default()),
+            Arc::new(AlphaVantageAdapter::default()),
             Arc::new(YahooAdapter::default()),
         ])
     }
@@ -128,7 +130,7 @@ impl SourceRouter {
         self.route_endpoint(Endpoint::Quote, strategy, move |source| {
             source.quote(req.clone())
         })
-            .await
+        .await
     }
 
     pub async fn route_bars(
@@ -140,7 +142,7 @@ impl SourceRouter {
         self.route_endpoint(Endpoint::Bars, strategy, move |source| {
             source.bars(req.clone())
         })
-            .await
+        .await
     }
 
     pub async fn route_fundamentals(
@@ -152,7 +154,7 @@ impl SourceRouter {
         self.route_endpoint(Endpoint::Fundamentals, strategy, move |source| {
             source.fundamentals(req.clone())
         })
-            .await
+        .await
     }
 
     pub async fn route_search(
@@ -164,7 +166,7 @@ impl SourceRouter {
         self.route_endpoint(Endpoint::Search, strategy, move |source| {
             source.search(req.clone())
         })
-            .await
+        .await
     }
 
     async fn route_endpoint<T, F>(
@@ -296,8 +298,11 @@ impl SourceRouter {
             let capabilities = source.capabilities();
             let health = source.health().await;
             let supports_endpoint = capabilities.supports(endpoint);
+            if !supports_endpoint {
+                continue;
+            }
 
-            let endpoint_score = if supports_endpoint { 1_000 } else { 0 };
+            let endpoint_score = 1_000;
             let health_score = match health.state {
                 HealthState::Healthy => 250,
                 HealthState::Degraded => 100,
@@ -371,7 +376,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_falls_back_to_yahoo_after_polygon_rate_limit() {
+    fn auto_falls_back_to_alpaca_after_polygon_rate_limit() {
         let router = SourceRouter::default();
         let request = QuoteRequest::new(vec![
             Symbol::parse("AAPL").expect("valid symbol"),
@@ -384,13 +389,24 @@ mod tests {
         let result = block_on(router.route_quote(&request, SourceStrategy::Auto))
             .expect("route should succeed with fallback");
 
-        assert_eq!(result.selected_source, ProviderId::Yahoo);
+        assert_eq!(result.selected_source, ProviderId::Alpaca);
         assert_eq!(
             result.source_chain,
-            vec![ProviderId::Polygon, ProviderId::Yahoo]
+            vec![ProviderId::Polygon, ProviderId::Alpaca]
         );
         assert_eq!(result.errors.len(), 1);
         assert_eq!(result.errors[0].source, Some(ProviderId::Polygon));
+    }
+
+    #[test]
+    fn auto_chain_for_fundamentals_excludes_alpaca() {
+        let router = SourceRouter::default();
+
+        let chain = block_on(
+            router.source_chain_for_strategy(Endpoint::Fundamentals, &SourceStrategy::Auto),
+        );
+
+        assert!(!chain.contains(&ProviderId::Alpaca));
     }
 
     #[test]
@@ -404,7 +420,8 @@ mod tests {
         ])
         .expect("valid request");
 
-        let result = block_on(router.route_quote(&request, SourceStrategy::Strict(ProviderId::Polygon)));
+        let result =
+            block_on(router.route_quote(&request, SourceStrategy::Strict(ProviderId::Polygon)));
 
         let failure = result.expect_err("strict route should fail");
         assert_eq!(failure.source_chain, vec![ProviderId::Polygon]);

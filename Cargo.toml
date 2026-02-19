@@ -15,6 +15,7 @@ rust-version = "1.83"
 [workspace.dependencies]
 clap = { version = "4.5.31", features = ["derive"] }
 duckdb = { version = "1.2.2", features = ["bundled"] }
+governor = "0.6.3"
 serde = { version = "1.0.218", features = ["derive"] }
 serde_json = "1.0.139"
 tempfile = "3.17.1"
