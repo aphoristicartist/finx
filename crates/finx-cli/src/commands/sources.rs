@@ -7,6 +7,13 @@ use crate::error::CliError;
 
 use super::CommandResult;
 
+const PROVIDER_OUTPUT_ORDER: [ProviderId; 4] = [
+    ProviderId::Polygon,
+    ProviderId::Alpaca,
+    ProviderId::Alphavantage,
+    ProviderId::Yahoo,
+];
+
 #[derive(Debug, Serialize)]
 struct SourceStatus {
     id: ProviderId,
@@ -25,8 +32,8 @@ pub async fn run(
     router: &SourceRouter,
     source_chain: Vec<ProviderId>,
 ) -> Result<CommandResult, CliError> {
-    let mut sources = Vec::with_capacity(ProviderId::ALL.len());
-    for id in ProviderId::ALL {
+    let mut sources = Vec::with_capacity(PROVIDER_OUTPUT_ORDER.len());
+    for id in PROVIDER_OUTPUT_ORDER {
         let source_status = match router.snapshot(id).await {
             Some(snapshot) => {
                 let capabilities = if args.verbose {

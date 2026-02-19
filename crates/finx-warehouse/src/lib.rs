@@ -573,7 +573,6 @@ fn enforce_read_only_query(sql: &str) -> Result<(), WarehouseError> {
 
 fn is_select_like(sql: &str) -> bool {
     let first_keyword = sql
-        .trim_start()
         .split_whitespace()
         .next()
         .unwrap_or_default()

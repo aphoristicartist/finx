@@ -53,16 +53,29 @@ Implemented adapters:
 
 - `PolygonAdapter`
 - `YahooAdapter`
+- `AlphaVantageAdapter`
+- `AlpacaAdapter`
 
-Both adapters include:
+Adapters include:
 
 - auth-capable HTTP transport abstraction (`HttpClient`, `HttpAuth`)
 - circuit breaker protection (`CircuitBreaker`)
 - deterministic normalization into canonical models
 
+## Capability Matrix
+
+| Provider | Quote | Bars | Fundamentals | Search | Score |
+| --- | --- | --- | --- | --- | --- |
+| Polygon | Yes | Yes | Yes | Yes | 90 |
+| Alpaca | Yes | Yes | No | No | 85 |
+| Yahoo | Yes | Yes | Yes | Yes | 78 |
+| Alpha Vantage | Yes | Yes | Yes | Yes | 70 |
+
 ## HTTP Auth Configuration
 
 `PolygonAdapter::default()` reads `FINX_POLYGON_API_KEY` for `x-api-key` auth (falls back to `demo`).
+`AlphaVantageAdapter::default()` reads `FINX_ALPHAVANTAGE_API_KEY` and appends `apikey` query auth (falls back to `demo`).
+`AlpacaAdapter::default()` reads `FINX_ALPACA_API_KEY` and `FINX_ALPHAVANTAGE_SECRET_KEY` for dual header auth (`APCA-API-KEY-ID`, `APCA-API-SECRET-KEY`, both fallback to `demo`).
 
 Adapters can be explicitly configured in code:
 
@@ -91,4 +104,3 @@ let adapter = PolygonAdapter::with_http_client(
 ## Security Notes
 
 - `schema get` path handling is constrained to files under `schemas/v1` with canonical path checks to prevent traversal.
-

@@ -9,6 +9,7 @@ description = "Core domain contracts and envelopes for finx"
 [dependencies]
 duckdb.workspace = true
 finx-warehouse = { path = "../finx-warehouse" }
+governor.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -16,3 +17,7 @@ time.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+
+[[test]]
+name = "provider_contract"
+path = "../../tests/contract/provider_contract.rs"

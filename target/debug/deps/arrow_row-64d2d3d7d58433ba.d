@@ -1,0 +1,11 @@
+/private/tmp/finx-phase5/target/debug/deps/arrow_row-64d2d3d7d58433ba.d: /Users/aleksandrlisenko/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arrow-row-56.2.0/src/lib.rs /Users/aleksandrlisenko/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arrow-row-56.2.0/src/fixed.rs /Users/aleksandrlisenko/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arrow-row-56.2.0/src/list.rs /Users/aleksandrlisenko/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arrow-row-56.2.0/src/run.rs /Users/aleksandrlisenko/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arrow-row-56.2.0/src/variable.rs
+
+/private/tmp/finx-phase5/target/debug/deps/libarrow_row-64d2d3d7d58433ba.rlib: /Users/aleksandrlisenko/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arrow-row-56.2.0/src/lib.rs /Users/aleksandrlisenko/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arrow-row-56.2.0/src/fixed.rs /Users/aleksandrlisenko/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arrow-row-56.2.0/src/list.rs /Users/aleksandrlisenko/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arrow-row-56.2.0/src/run.rs /Users/aleksandrlisenko/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arrow-row-56.2.0/src/variable.rs
+
+/private/tmp/finx-phase5/target/debug/deps/libarrow_row-64d2d3d7d58433ba.rmeta: /Users/aleksandrlisenko/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arrow-row-56.2.0/src/lib.rs /Users/aleksandrlisenko/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arrow-row-56.2.0/src/fixed.rs /Users/aleksandrlisenko/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arrow-row-56.2.0/src/list.rs /Users/aleksandrlisenko/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arrow-row-56.2.0/src/run.rs /Users/aleksandrlisenko/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arrow-row-56.2.0/src/variable.rs
+
+/Users/aleksandrlisenko/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arrow-row-56.2.0/src/lib.rs:
+/Users/aleksandrlisenko/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arrow-row-56.2.0/src/fixed.rs:
+/Users/aleksandrlisenko/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arrow-row-56.2.0/src/list.rs:
+/Users/aleksandrlisenko/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arrow-row-56.2.0/src/run.rs:
+/Users/aleksandrlisenko/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/arrow-row-56.2.0/src/variable.rs:
