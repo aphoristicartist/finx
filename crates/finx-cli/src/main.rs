@@ -1,6 +1,7 @@
 mod cli;
 mod commands;
 mod error;
+mod metadata;
 mod output;
 
 use clap::Parser;
@@ -25,7 +26,11 @@ async fn run() -> Result<ExitCode, CliError> {
     let cli = Cli::parse();
 
     let envelope = commands::run(&cli).await?;
-    output::render(&envelope, cli.format, cli.pretty)?;
+    if cli.stream {
+        output::render_stream(&envelope, cli.explain)?;
+    } else {
+        output::render(&envelope, cli.format, cli.pretty)?;
+    }
 
     if cli.strict && (!envelope.meta.warnings.is_empty() || !envelope.errors.is_empty()) {
         return Err(CliError::StrictModeViolation {

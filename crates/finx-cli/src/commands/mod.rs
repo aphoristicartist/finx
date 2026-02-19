@@ -8,12 +8,12 @@ mod sources;
 mod sql;
 mod warehouse_sync;
 
-use finx_core::{Endpoint, Envelope, EnvelopeMeta, ProviderId, SourceRouter, SourceStrategy};
+use finx_core::{Endpoint, Envelope, ProviderId, SourceRouter, SourceStrategy};
 use serde_json::Value;
-use uuid::Uuid;
 
 use crate::cli::{Cli, Command, SourceSelector};
 use crate::error::CliError;
+use crate::metadata::Metadata;
 
 pub struct CommandResult {
     pub data: Value,
@@ -71,9 +71,11 @@ pub async fn run(cli: &Cli) -> Result<Envelope<Value>, CliError> {
         Command::Bars(args) => bars::run(args, &router, &strategy).await?,
         Command::Fundamentals(args) => fundamentals::run(args, &router, &strategy).await?,
         Command::Search(args) => search::run(args, &router, &strategy).await?,
-        Command::Sql(args) => {
-            sql::run(args, non_provider_source_chain(&router, &strategy).await)?
-        }
+        Command::Sql(args) => sql::run(
+            args,
+            cli.explain,
+            non_provider_source_chain(&router, &strategy).await,
+        )?,
         Command::Cache(args) => {
             cache::run(args, non_provider_source_chain(&router, &strategy).await)?
         }
@@ -81,41 +83,43 @@ pub async fn run(cli: &Cli) -> Result<Envelope<Value>, CliError> {
             schema::run(args, non_provider_source_chain(&router, &strategy).await)?
         }
         Command::Sources(args) => {
-            sources::run(args, &router, non_provider_source_chain(&router, &strategy).await)
-                .await?
+            sources::run(
+                args,
+                &router,
+                non_provider_source_chain(&router, &strategy).await,
+            )
+            .await?
         }
     };
 
     let CommandResult {
         data,
-        warnings,
+        mut warnings,
         errors,
         latency_ms,
         cache_hit,
         source_chain,
     } = command_result;
 
-    let mut meta = EnvelopeMeta::new(
-        Uuid::new_v4().to_string(),
-        "v1.0.0",
-        source_chain,
-        latency_ms,
-        cache_hit,
-    )?;
-
-    if cli.profile {
-        meta.push_warning("--profile is accepted but profiling is not implemented in this phase");
+    if cli.explain && !matches!(&cli.command, Command::Sql(_)) {
+        warnings.push(String::from(
+            "--explain currently applies to the 'sql' command",
+        ));
     }
 
-    if cli.stream {
-        meta.push_warning(
-            "--stream is accepted but streaming output is not implemented in this phase",
-        );
+    let mut metadata = Metadata::new(source_chain, latency_ms, cache_hit)?;
+
+    if cli.profile {
+        metadata
+            .push_warning("--profile is accepted but profiling is not implemented in this phase");
     }
 
     for warning in warnings {
-        meta.push_warning(warning);
+        metadata.push_warning(warning);
     }
+
+    let _deterministic_metadata_json = metadata.to_deterministic_json()?;
+    let meta = metadata.into_envelope_meta("v1.0.0")?;
 
     Envelope::with_errors(meta, data, errors).map_err(CliError::from)
 }
@@ -134,5 +138,7 @@ async fn non_provider_source_chain(
     router: &SourceRouter,
     strategy: &SourceStrategy,
 ) -> Vec<ProviderId> {
-    router.source_chain_for_strategy(Endpoint::Quote, strategy).await
+    router
+        .source_chain_for_strategy(Endpoint::Quote, strategy)
+        .await
 }
