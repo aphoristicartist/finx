@@ -1,3 +1,65 @@
+//! # Response Envelope
+//!
+//! Standard response envelope for all Ferrotick machine-readable output.
+//!
+//! ## Overview
+//!
+//! Every CLI output and API response is wrapped in an [`Envelope`] that provides:
+//!
+//! - **Metadata** - Request tracking, timing, source chain
+//! - **Data** - The actual response payload
+//! - **Errors** - Structured error information
+//! - **Warnings** - Non-fatal issues
+//!
+//! ## Structure
+//!
+//! ```json
+//! {
+//!   "meta": {
+//!     "request_id": "req_abc123",
+//!     "schema_version": "v1.0.0",
+//!     "generated_at": "2024-02-20T16:00:00Z",
+//!     "source_chain": ["polygon"],
+//!     "latency_ms": 142,
+//!     "cache_hit": false
+//!   },
+//!   "data": { ... },
+//!   "errors": [],
+//!   "warnings": []
+//! }
+//! ```
+//!
+//! ## Error Handling
+//!
+//! The envelope supports partial success: data may be present alongside errors.
+//! Use `--strict` mode to treat any errors or warnings as failures.
+//!
+//! ```rust,ignore
+//! use ferrotick_core::{Envelope, EnvelopeMeta, EnvelopeError, ProviderId};
+//!
+//! // Create a successful envelope
+//! let meta = EnvelopeMeta::new(
+//!     "req-12345678",
+//!     "v1.0.0",
+//!     vec![ProviderId::Polygon],
+//!     100,
+//!     false,
+//! )?;
+//!
+//! let envelope = Envelope::success(meta, my_data);
+//!
+//! // Add a warning
+//! envelope.meta.push_warning("Rate limit approaching");
+//!
+//! // Add an error (partial success)
+//! envelope.push_error(EnvelopeError::new("source.rate_limited", "Rate limited")?)?;
+//! ```
+//!
+//! ## Schema Compliance
+//!
+//! The envelope structure is defined by `schemas/v1/envelope.schema.json`.
+//! All envelopes must comply with this schema for contract guarantees.
+
 use serde::{Deserialize, Serialize};
 
 use crate::{ProviderId, UtcDateTime, ValidationError};

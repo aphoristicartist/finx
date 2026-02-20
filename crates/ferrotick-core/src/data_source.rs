@@ -1,3 +1,35 @@
+//! Data source trait and request/response types.
+//!
+//! This module defines the core adapter contract (`DataSource`) that all
+//! provider implementations must follow, along with the request and response
+//! types for each endpoint.
+//!
+//! # Endpoints
+//!
+//! | Endpoint | Request | Response | Description |
+//! |----------|---------|----------|-------------|
+//! | Quote | [`QuoteRequest`] | [`QuoteBatch`] | Real-time/delayed quotes |
+//! | Bars | [`BarsRequest`] | [`BarSeries`] | Historical OHLCV data |
+//! | Fundamentals | [`FundamentalsRequest`] | [`FundamentalsBatch`] | Company fundamentals |
+//! | Search | [`SearchRequest`] | [`SearchBatch`] | Instrument search |
+//!
+//! # Example
+//!
+//! ```rust,ignore
+//! use ferrotick_core::{DataSource, QuoteRequest, QuoteBatch, SourceError, PolygonAdapter, Symbol};
+//!
+//! async fn fetch_quote(adapter: &PolygonAdapter) -> Result<(), SourceError> {
+//!     let request = QuoteRequest::new(vec![Symbol::new("AAPL")])?;
+//!     let response = adapter.quote(request).await?;
+//!     
+//!     for quote in &response.quotes {
+//!         println!("{}: ${:.2}", quote.symbol, quote.price);
+//!     }
+//!     
+//!     Ok(())
+//! }
+//! ```
+
 use std::fmt::{Display, Formatter};
 use std::future::Future;
 use std::pin::Pin;
@@ -320,24 +352,109 @@ pub struct SearchBatch {
 }
 
 /// Source adapter contract.
+///
+/// All data providers must implement this trait to be used with the router.
+/// The trait uses async methods returning boxed futures for flexibility.
+///
+/// # Required Methods
+///
+/// | Method | Description |
+/// |--------|-------------|
+/// | [`id`](DataSource::id) | Unique provider identifier |
+/// | [`capabilities`](DataSource::capabilities) | Supported endpoints |
+/// | [`quote`](DataSource::quote) | Fetch quotes |
+/// | [`bars`](DataSource::bars) | Fetch OHLCV bars |
+/// | [`fundamentals`](DataSource::fundamentals) | Fetch fundamentals |
+/// | [`search`](DataSource::search) | Search instruments |
+/// | [`health`](DataSource::health) | Check source health |
+///
+/// # Example Implementation
+///
+/// ```rust,ignore
+/// use ferrotick_core::{DataSource, ProviderId, CapabilitySet, QuoteRequest, QuoteBatch};
+///
+/// struct MyAdapter {
+///     // fields...
+/// }
+///
+/// impl DataSource for MyAdapter {
+///     fn id(&self) -> ProviderId {
+///         ProviderId::new("my_provider")
+///     }
+///     
+///     fn capabilities(&self) -> CapabilitySet {
+///         CapabilitySet::new(true, true, false, true)
+///     }
+///     
+///     // ... implement other methods
+/// }
+/// ```
+///
+/// # Thread Safety
+///
+/// Implementations must be `Send + Sync` as they may be shared across threads.
 pub trait DataSource: Send + Sync {
+    /// Returns the unique provider identifier.
     fn id(&self) -> ProviderId;
+    
+    /// Returns the set of supported endpoints.
     fn capabilities(&self) -> CapabilitySet;
+    
+    /// Fetches real-time or delayed quotes for the requested symbols.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SourceError`] if:
+    /// - The endpoint is not supported (check [`capabilities`](DataSource::capabilities))
+    /// - The provider is unavailable
+    /// - Rate limiting is in effect
+    /// - Invalid symbols are provided
     fn quote<'a>(
         &'a self,
         req: QuoteRequest,
     ) -> Pin<Box<dyn Future<Output = Result<QuoteBatch, SourceError>> + Send + 'a>>;
+    
+    /// Fetches historical OHLCV bars.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SourceError`] if:
+    /// - The endpoint is not supported
+    /// - Invalid interval or limit values
+    /// - The provider is unavailable
     fn bars<'a>(
         &'a self,
         req: BarsRequest,
     ) -> Pin<Box<dyn Future<Output = Result<BarSeries, SourceError>> + Send + 'a>>;
+    
+    /// Fetches company fundamentals.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SourceError`] if:
+    /// - The endpoint is not supported
+    /// - Invalid symbols are provided
+    /// - The provider is unavailable
     fn fundamentals<'a>(
         &'a self,
         req: FundamentalsRequest,
     ) -> Pin<Box<dyn Future<Output = Result<FundamentalsBatch, SourceError>> + Send + 'a>>;
+    
+    /// Searches for instruments matching a query.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SourceError`] if:
+    /// - The endpoint is not supported
+    /// - Empty query is provided
+    /// - The provider is unavailable
     fn search<'a>(
         &'a self,
         req: SearchRequest,
     ) -> Pin<Box<dyn Future<Output = Result<SearchBatch, SourceError>> + Send + 'a>>;
+    
+    /// Returns the current health status of this source.
+    ///
+    /// Used by the router for source scoring and fallback decisions.
     fn health<'a>(&'a self) -> Pin<Box<dyn Future<Output = HealthStatus> + Send + 'a>>;
 }

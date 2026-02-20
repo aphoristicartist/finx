@@ -1,7 +1,87 @@
-//! Ferrotick Warehouse - DuckDB-based data storage layer
+//! # Ferrotick Warehouse
 //!
-//! Provides secure, parameterized SQL operations for market data storage
-//! and retrieval with connection pooling and query guardrails.
+//! DuckDB-based data storage layer for Ferrotick.
+//!
+//! ## Overview
+//!
+//! This crate provides secure, efficient storage and retrieval of market data
+//! using DuckDB as the analytical database engine.
+//!
+//! ### Features
+//!
+//! - 🔒 **Secure SQL**: Parameterized queries prevent SQL injection
+//! - 📊 **Analytical Queries**: Fast aggregations and complex queries via DuckDB
+//! - 🔄 **Connection Pooling**: Efficient connection management
+//! - ⚡ **Query Guardrails**: Timeout and row limits for safety
+//! - 📦 **Parquet Integration**: Sync local parquet cache with warehouse
+//!
+//! ## Quick Start
+//!
+//! ```rust,no_run
+//! use ferrotick_warehouse::{Warehouse, WarehouseConfig, QueryGuardrails};
+//!
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     // Open the warehouse
+//!     let warehouse = Warehouse::open_default()?;
+//!     
+//!     // Configure query guardrails
+//!     let guardrails = QueryGuardrails {
+//!         max_rows: 1000,
+//!         query_timeout_ms: 5000,
+//!     };
+//!     
+//!     // Execute a query
+//!     let result = warehouse.execute_query(
+//!         "SELECT * FROM bars_1d WHERE symbol = 'AAPL' LIMIT 10",
+//!         guardrails,
+//!         false, // read-only mode
+//!     )?;
+//!     
+//!     println!("Found {} rows", result.row_count);
+//!     
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ## Security
+//!
+//! All user input is handled through parameterized queries:
+//!
+//! ```rust,no_run
+//! # use ferrotick_warehouse::{Warehouse, QuoteRecord};
+//! # let warehouse = Warehouse::open_default()?;
+//! // User input is passed as parameters, never interpolated
+//! let quotes = vec![QuoteRecord {
+//!     symbol: "AAPL'; DROP TABLE quotes; --".to_string(), // Malicious input
+//!     price: 150.0,
+//!     // ... other fields
+//!     bid: None, ask: None, volume: None, currency: "USD".to_string(), as_of: "2024-01-01T00:00:00Z".to_string(),
+//! }];
+//! 
+//! // Safe: parameterized query prevents SQL injection
+//! warehouse.ingest_quotes("test", "req-001", &quotes, 100)?;
+//! # Ok::<(), ferrotick_warehouse::WarehouseError>(())
+//! ```
+//!
+//! ## Tables
+//!
+//! | Table | Description |
+//! |-------|-------------|
+//! | `quotes_latest` | Latest quotes by symbol |
+//! | `bars_1m` | Minute bars |
+//! | `bars_1d` | Daily bars |
+//! | `fundamentals` | Company fundamentals |
+//! | `instruments` | Instrument metadata |
+//! | `cache_manifest` | Parquet file tracking |
+//! | `ingest_log` | Ingestion audit log |
+//!
+//! ## Views
+//!
+//! | View | Description |
+//! |------|-------------|
+//! | `v_daily_bars` | Daily OHLCV data with metadata |
+//! | `v_quote_history` | Historical quote snapshots |
+//! | `v_fundamentals` | Company fundamentals with metadata |
 
 pub mod duckdb;
 pub mod migrations;
