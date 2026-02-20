@@ -31,7 +31,8 @@ impl Default for AlpacaAdapter {
             rate_available: true,
             score: 85,
             http_client: Arc::new(NoopHttpClient),
-            api_key: std::env::var("FERROTICK_ALPACA_API_KEY").unwrap_or_else(|_| String::from("demo")),
+            api_key: std::env::var("FERROTICK_ALPACA_API_KEY")
+                .unwrap_or_else(|_| String::from("demo")),
             secret_key: std::env::var("FERROTICK_ALPHAVANTAGE_SECRET_KEY")
                 .unwrap_or_else(|_| String::from("demo")),
             circuit_breaker: Arc::new(CircuitBreaker::default()),
