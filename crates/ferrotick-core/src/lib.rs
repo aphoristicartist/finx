@@ -37,6 +37,7 @@ pub use ferrotick_warehouse::{
 };
 pub use http_client::{
     HttpAuth, HttpClient, HttpError, HttpMethod, HttpRequest, HttpResponse, NoopHttpClient,
+    ReqwestHttpClient,
 };
 pub use provider_policy::{BackoffPolicy, ProviderPolicy};
 pub use routing::{

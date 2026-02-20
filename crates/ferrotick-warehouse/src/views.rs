@@ -1,8 +1,20 @@
+//! Database views for analytical queries.
+
 use ::duckdb::Connection;
 
+/// Create database views for common analytical queries.
+///
+/// Creates the following views:
+/// - `vw_returns_daily`: Daily return percentages per symbol
+/// - `vw_volatility_20d`: 20-day rolling volatility
+/// - `vw_gaps_open`: Gap percentages between close and open
+/// - `vw_source_latency`: Average latency by source and dataset
+///
+/// # Errors
+/// Returns an error if the view creation SQL fails to execute.
 pub fn create_views(connection: &Connection) -> Result<(), ::duckdb::Error> {
     connection.execute_batch(
-        r#"
+        r"
 CREATE OR REPLACE VIEW vw_returns_daily AS
 SELECT
     symbol,
@@ -46,7 +58,7 @@ SELECT
 FROM ingest_log
 WHERE latency_ms IS NOT NULL
 GROUP BY source, dataset;
-"#,
+",
     )?;
 
     Ok(())

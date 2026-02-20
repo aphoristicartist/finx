@@ -8,7 +8,7 @@ struct Migration {
 const MIGRATIONS: &[Migration] = &[
     Migration {
         version: "0001_core_tables",
-        sql: r#"
+        sql: r"
 CREATE TABLE IF NOT EXISTS instruments (
     symbol TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -100,32 +100,48 @@ CREATE TABLE IF NOT EXISTS ingest_log (
     latency_ms BIGINT,
     timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-"#,
+",
     },
     Migration {
         version: "0002_indexes",
-        sql: r#"
+        sql: r"
 CREATE INDEX IF NOT EXISTS idx_quotes_latest_as_of ON quotes_latest(as_of);
 CREATE INDEX IF NOT EXISTS idx_bars_1m_symbol_ts ON bars_1m(symbol, ts);
 CREATE INDEX IF NOT EXISTS idx_bars_1d_symbol_ts ON bars_1d(symbol, ts);
 CREATE INDEX IF NOT EXISTS idx_fundamentals_symbol_date ON fundamentals(symbol, date);
 CREATE INDEX IF NOT EXISTS idx_cache_manifest_dataset_symbol ON cache_manifest(dataset, symbol);
 CREATE INDEX IF NOT EXISTS idx_ingest_log_source_dataset_ts ON ingest_log(source, dataset, timestamp);
-"#,
+",
     },
 ];
 
+/// Apply database migrations in order.
+///
+/// Creates the `schema_migrations` table if it doesn't exist, then applies
+/// each migration in sequence, tracking which have been applied.
+///
+/// # Errors
+/// Returns an error if:
+/// - The `schema_migrations` table cannot be created
+/// - Any migration SQL fails to execute
+/// - The migration tracking insert fails
+///
+/// # Security
+/// Migration version strings are hardcoded constants, not user input.
+/// The `escape_sql_string` function provides defense-in-depth against
+/// any accidental special characters in version strings.
 pub fn apply_migrations(connection: &Connection) -> Result<(), ::duckdb::Error> {
     connection.execute_batch(
-        r#"
+        r"
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version TEXT PRIMARY KEY,
     applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-"#,
+",
     )?;
 
     for migration in MIGRATIONS {
+        // Migration version is a hardcoded constant, safe to interpolate
         let query = format!(
             "SELECT COUNT(*) FROM schema_migrations WHERE version = '{}'",
             escape_sql_string(migration.version)
@@ -145,6 +161,9 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     Ok(())
 }
 
+/// Escape a string for safe inclusion in SQL.
+///
+/// Used for migration version strings which are hardcoded constants.
 fn escape_sql_string(value: &str) -> String {
     value.replace('\'', "''")
 }

@@ -1,12 +1,17 @@
+//! `DuckDB` connection pool management.
+
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use ::duckdb::Connection;
 
+/// Access mode for database connections.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccessMode {
+    /// Read-only access.
     ReadOnly,
+    /// Read-write access.
     ReadWrite,
 }
 
@@ -30,12 +35,19 @@ struct PoolInner {
     state: Mutex<PoolState>,
 }
 
+/// A connection pool manager for `DuckDB` connections.
 #[derive(Clone)]
 pub struct DuckDbConnectionManager {
     inner: Arc<PoolInner>,
 }
 
 impl DuckDbConnectionManager {
+    /// Create a new connection pool manager.
+    ///
+    /// # Arguments
+    /// * `path` - Path to the `DuckDB` database file
+    /// * `max_pool_size` - Maximum number of connections to keep in the pool
+    #[must_use]
     pub fn new(path: impl Into<PathBuf>, max_pool_size: usize) -> Self {
         Self {
             inner: Arc::new(PoolInner {
@@ -46,6 +58,19 @@ impl DuckDbConnectionManager {
         }
     }
 
+    /// Acquire a connection from the pool.
+    ///
+    /// # Arguments
+    /// * `mode` - Access mode for the connection
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - The database file cannot be opened
+    /// - Connection configuration fails
+    ///
+    /// # Panics
+    /// Panics if the connection pool mutex is poisoned (indicating a previous panic
+    /// while holding the lock).
     pub fn acquire(&self, mode: AccessMode) -> Result<PooledConnection, ::duckdb::Error> {
         let mut state = self
             .inner
@@ -70,11 +95,14 @@ impl DuckDbConnectionManager {
         })
     }
 
+    /// Get the path to the database file.
+    #[must_use]
     pub fn db_path(&self) -> &Path {
         self.inner.db_path.as_path()
     }
 }
 
+/// A pooled connection that returns to the pool when dropped.
 pub struct PooledConnection {
     mode: AccessMode,
     pool: Arc<PoolInner>,
@@ -125,12 +153,20 @@ impl Drop for PooledConnection {
     }
 }
 
+/// Open a new database connection.
+///
+/// # Errors
+/// Returns an error if the database file cannot be opened or configured.
 fn open_connection(path: &Path, mode: AccessMode) -> Result<Connection, ::duckdb::Error> {
     let connection = Connection::open(path)?;
     configure_connection(&connection, mode)?;
     Ok(connection)
 }
 
+/// Configure a database connection with appropriate settings.
+///
+/// # Errors
+/// Returns an error if configuration SQL fails to execute.
 fn configure_connection(connection: &Connection, mode: AccessMode) -> Result<(), ::duckdb::Error> {
     connection.execute_batch("PRAGMA disable_progress_bar;")?;
     if mode == AccessMode::ReadOnly {

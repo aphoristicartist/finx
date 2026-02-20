@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 /// Minimal HTTP method set needed by provider adapters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -161,6 +162,86 @@ impl HttpClient for NoopHttpClient {
     ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, HttpError>> + Send + 'a>> {
         let _ = request;
         Box::pin(async move { Ok(HttpResponse::ok_json("{}")) })
+    }
+}
+
+/// Production HTTP client using reqwest for real API calls.
+#[derive(Debug, Clone)]
+pub struct ReqwestHttpClient {
+    client: Arc<reqwest::Client>,
+}
+
+impl ReqwestHttpClient {
+    /// Create a new ReqwestHttpClient with default configuration.
+    pub fn new() -> Self {
+        Self {
+            client: Arc::new(
+                reqwest::Client::builder()
+                    .user_agent("ferrotick/0.1.0")
+                    .build()
+                    .unwrap_or_else(|_| reqwest::Client::new()),
+            ),
+        }
+    }
+
+    /// Create a ReqwestHttpClient with a custom reqwest::Client.
+    pub fn with_client(client: reqwest::Client) -> Self {
+        Self {
+            client: Arc::new(client),
+        }
+    }
+}
+
+impl Default for ReqwestHttpClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl HttpClient for ReqwestHttpClient {
+    fn execute<'a>(
+        &'a self,
+        request: HttpRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, HttpError>> + Send + 'a>> {
+        Box::pin(async move {
+            let mut builder = match request.method {
+                HttpMethod::Get => self.client.get(&request.url),
+                HttpMethod::Post => self.client.post(&request.url),
+            };
+
+            // Apply headers
+            for (name, value) in &request.headers {
+                builder = builder.header(name, value);
+            }
+
+            // Apply timeout
+            let timeout = std::time::Duration::from_millis(request.timeout_ms);
+            builder = builder.timeout(timeout);
+
+            // Apply body if present
+            if let Some(body) = request.body {
+                builder = builder.body(body);
+            }
+
+            // Execute request
+            let response = builder.send().await.map_err(|e| {
+                if e.is_timeout() {
+                    HttpError::new(format!("request timeout: {}", e))
+                } else if e.is_connect() {
+                    HttpError::new(format!("connection failed: {}", e))
+                } else {
+                    HttpError::new(format!("request failed: {}", e))
+                }
+            })?;
+
+            let status = response.status().as_u16();
+            let body = response
+                .text()
+                .await
+                .map_err(|e| HttpError::new(format!("failed to read response body: {}", e)))?;
+
+            Ok(HttpResponse { status, body })
+        })
     }
 }
 
