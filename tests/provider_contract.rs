@@ -1,4 +1,4 @@
-use finx_core::{
+use ferrotick_core::{
     adapters::{AlpacaAdapter, AlphaVantageAdapter, PolygonAdapter, YahooAdapter},
     data_source::{
         BarsRequest, CapabilitySet, DataSource, Endpoint, FundamentalsBatch, FundamentalsRequest,

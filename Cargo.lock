@@ -618,6 +618,46 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
 
 [[package]]
+name = "ferrotick-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "duckdb",
+ "ferrotick-core",
+ "ferrotick-warehouse",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "ferrotick-core"
+version = "0.1.0"
+dependencies = [
+ "duckdb",
+ "ferrotick-warehouse",
+ "governor",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "time",
+]
+
+[[package]]
+name = "ferrotick-warehouse"
+version = "0.1.0"
+dependencies = [
+ "duckdb",
+ "hex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "filetime"
 version = "0.2.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -633,46 +673,6 @@ name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
-
-[[package]]
-name = "finx-cli"
-version = "0.1.0"
-dependencies = [
- "clap",
- "duckdb",
- "finx-core",
- "finx-warehouse",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
- "uuid",
-]
-
-[[package]]
-name = "finx-core"
-version = "0.1.0"
-dependencies = [
- "duckdb",
- "finx-warehouse",
- "governor",
- "serde",
- "serde_json",
- "thiserror",
- "time",
-]
-
-[[package]]
-name = "finx-warehouse"
-version = "0.1.0"
-dependencies = [
- "duckdb",
- "hex",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
-]
 
 [[package]]
 name = "flate2"

@@ -7,7 +7,7 @@
 
 ## Context
 
-`finx` must be first-class for machine consumers, including agents that need stable schemas, deterministic metadata, and stream-friendly responses.
+`ferrotick` must be first-class for machine consumers, including agents that need stable schemas, deterministic metadata, and stream-friendly responses.
 
 ## Decision
 

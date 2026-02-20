@@ -3,14 +3,14 @@
 ## 1. Scope and Product Definition
 
 ### 1.1 Product Goal
-Build a production-grade Rust CLI (`finx`) for market and fundamentals data that:
+Build a production-grade Rust CLI (`ferrotick`) for market and fundamentals data that:
 - Aggregates Yahoo, Polygon, Alpha Vantage, and Alpaca behind one normalized API.
 - Caches data locally in Parquet and exposes DuckDB analytics views.
 - Starts in under 100ms for local/cached commands.
 - Is first-class for AI agents (strict JSON schemas, metadata, and streaming events).
 
 ### 1.2 Success Criteria (Improvement Over `yfinance`)
-`finx` must exceed `yfinance` on:
+`ferrotick` must exceed `yfinance` on:
 - Provider resilience: source routing and fallback, not single-provider dependence.
 - Contract stability: versioned JSON schemas and deterministic machine-readable output.
 - Local analytics: SQL-first workflow over cached data with DuckDB views.
@@ -79,7 +79,7 @@ Build a production-grade Rust CLI (`finx`) for market and fundamentals data that
 - Stable exit code contract.
 
 ### Acceptance Criteria
-- `finx --help` p50 startup < 100ms on target machine.
+- `ferrotick --help` p50 startup < 100ms on target machine.
 - Schema tests passing for all command responses.
 
 ## Phase 2: Source Adapters (Yahoo + Polygon First) (Weeks 4-6)
@@ -109,7 +109,7 @@ Build a production-grade Rust CLI (`finx`) for market and fundamentals data that
 ## Phase 3: Local Cache (Parquet + Manifest) (Weeks 7-8)
 ### Tasks
 1. Implement cache root config:
-   - Default `~/.finx/`, override with `FINX_HOME`.
+   - Default `~/.ferrotick/`, override with `FERROTICK_HOME`.
 2. Define partitioned Parquet path strategy:
    - `cache/parquet/source={source}/dataset={dataset}/symbol={symbol}/date={yyyy-mm-dd}/part-*.parquet`
 3. Implement write-on-fetch with atomic temp file + rename.
@@ -150,7 +150,7 @@ Build a production-grade Rust CLI (`finx`) for market and fundamentals data that
    - `vw_volatility_20d`
    - `vw_gaps_open`
    - `vw_source_latency`
-5. Implement `finx sql "<query>" --format json|table|ndjson`.
+5. Implement `ferrotick sql "<query>" --format json|table|ndjson`.
 6. Add query guardrails:
    - read-only mode by default
    - max rows and timeout controls.
@@ -186,8 +186,8 @@ Build a production-grade Rust CLI (`finx`) for market and fundamentals data that
 2. Implement NDJSON event stream mode (`--stream`):
    - `start`, `progress`, `chunk`, `end`, `error`.
 3. Implement schema introspection commands:
-   - `finx schema list`
-   - `finx schema get <name>`
+   - `ferrotick schema list`
+   - `ferrotick schema get <name>`
 4. Add machine metadata:
    - `request_id`, `trace_id`, `source_chain`, `latency_ms`, `cache_hit`, `warnings`.
 5. Add deterministic ordering and stable numeric formatting.
@@ -223,7 +223,7 @@ Build a production-grade Rust CLI (`finx`) for market and fundamentals data that
 ## 4. Technical Specs by Component
 
 ## 4.1 CLI Spec
-- Binary: `finx`
+- Binary: `ferrotick`
 - Global flags:
   - `--format table|json|ndjson`
   - `--strict`
@@ -260,7 +260,7 @@ pub trait DataSource: Send + Sync {
 - Missing numeric values use `null`, never `NaN` or sentinel numbers.
 
 ## 4.4 Cache Spec
-- Cache root: `~/.finx/` (override `FINX_HOME`).
+- Cache root: `~/.ferrotick/` (override `FERROTICK_HOME`).
 - Atomic writes: temp file + fsync + rename.
 - Locking: per `(source,dataset,symbol,partition)` file lock.
 - Manifest row schema:
@@ -292,7 +292,7 @@ All schemas use JSON Schema draft 2020-12 with semantic versioning under `schema
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://finx.dev/schemas/v1/envelope.schema.json",
+  "$id": "https://ferrotick.dev/schemas/v1/envelope.schema.json",
   "title": "FinxEnvelope",
   "type": "object",
   "required": ["meta", "data"],
@@ -343,7 +343,7 @@ All schemas use JSON Schema draft 2020-12 with semantic versioning under `schema
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://finx.dev/schemas/v1/quote.response.schema.json",
+  "$id": "https://ferrotick.dev/schemas/v1/quote.response.schema.json",
   "allOf": [
     { "$ref": "envelope.schema.json" },
     {
@@ -383,7 +383,7 @@ All schemas use JSON Schema draft 2020-12 with semantic versioning under `schema
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://finx.dev/schemas/v1/bars.response.schema.json",
+  "$id": "https://ferrotick.dev/schemas/v1/bars.response.schema.json",
   "allOf": [
     { "$ref": "envelope.schema.json" },
     {
@@ -425,7 +425,7 @@ All schemas use JSON Schema draft 2020-12 with semantic versioning under `schema
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://finx.dev/schemas/v1/sql.response.schema.json",
+  "$id": "https://ferrotick.dev/schemas/v1/sql.response.schema.json",
   "allOf": [
     { "$ref": "envelope.schema.json" },
     {
@@ -466,7 +466,7 @@ All schemas use JSON Schema draft 2020-12 with semantic versioning under `schema
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://finx.dev/schemas/v1/stream.event.schema.json",
+  "$id": "https://ferrotick.dev/schemas/v1/stream.event.schema.json",
   "type": "object",
   "required": ["event", "seq", "ts"],
   "properties": {
@@ -502,19 +502,19 @@ All schemas use JSON Schema draft 2020-12 with semantic versioning under `schema
 ## 6. File and Module Structure
 
 ```text
-finx/
+ferrotick/
   Cargo.toml
   rust-toolchain.toml
   crates/
-    finx-cli/
+    ferrotick-cli/
       src/main.rs
       src/commands/
       src/output/
-    finx-core/
+    ferrotick-core/
       src/domain/
       src/service/
       src/schema/
-    finx-sources/
+    ferrotick-sources/
       src/lib.rs
       src/router.rs
       src/common/http.rs
@@ -522,20 +522,20 @@ finx/
       src/polygon/
       src/alphavantage/
       src/alpaca/
-    finx-cache/
+    ferrotick-cache/
       src/parquet_store.rs
       src/manifest.rs
       src/ttl.rs
       src/prune.rs
-    finx-warehouse/
+    ferrotick-warehouse/
       src/duckdb.rs
       src/migrations/
       src/views/
-    finx-agent/
+    ferrotick-agent/
       src/stream.rs
       src/envelope.rs
       src/schema_registry.rs
-    finx-telemetry/
+    ferrotick-telemetry/
       src/tracing.rs
       src/metrics.rs
   schemas/
@@ -567,10 +567,10 @@ finx/
 ## 7. Performance Targets (SLOs)
 
 ### 7.1 CLI and Runtime
-- `finx --help` startup:
+- `ferrotick --help` startup:
   - p50 < 100ms
   - p95 < 140ms
-- `finx quote AAPL --format json` (cache hit):
+- `ferrotick quote AAPL --format json` (cache hit):
   - p50 < 40ms
   - p95 < 80ms
 - Memory:

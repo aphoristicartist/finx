@@ -43,7 +43,7 @@ Add Alpha Vantage and Alpaca market data providers to complete the four-provider
 ### Implementation
 
 ```rust
-// crates/finx-core/src/adapters/alphavantage.rs
+// crates/ferrotick-core/src/adapters/alphavantage.rs
 
 pub struct AlphaVantageAdapter {
     health_state: HealthState,
@@ -64,7 +64,7 @@ impl AlphaVantageAdapter {
             http_client: Arc::new(NoopHttpClient),
             auth: HttpAuth::Query {
                 name: String::from("apikey"),
-                value: std::env::var("FINX_ALPHAVANTAGE_API_KEY")
+                value: std::env::var("FERROTICK_ALPHAVANTAGE_API_KEY")
                     .unwrap_or_else(|_| String::from("demo")),
             },
             circuit_breaker: Arc::new(CircuitBreaker::default()),
@@ -133,7 +133,7 @@ Alpha Vantage has strict rate limits, so we need:
 ### Implementation
 
 ```rust
-// crates/finx-core/src/adapters/alpaca.rs
+// crates/ferrotick-core/src/adapters/alpaca.rs
 
 pub struct AlpacaAdapter {
     health_state: HealthState,
@@ -153,7 +153,7 @@ impl AlpacaAdapter {
             http_client: Arc::new(NoopHttpClient),
             auth: HttpAuth::Header {
                 name: String::from("APCA-API-KEY-ID"),
-                value: std::env::var("FINX_ALPACA_API_KEY")
+                value: std::env::var("FERROTICK_ALPACA_API_KEY")
                     .unwrap_or_else(|_| String::from("demo")),
             },
             circuit_breaker: Arc::new(CircuitBreaker::default()),
@@ -161,7 +161,7 @@ impl AlpacaAdapter {
     }
 
     fn secret_key(&self) -> String {
-        std::env::var("FINX_ALPACA_SECRET_KEY")
+        std::env::var("FERROTICK_ALPACA_SECRET_KEY")
             .unwrap_or_else(|_| String::from("demo"))
     }
 }
@@ -212,7 +212,7 @@ impl DataSource for AlpacaAdapter {
 ### Routing Strategy
 
 ```rust
-// crates/finx-core/src/routing.rs
+// crates/ferrotick-core/src/routing.rs
 
 pub fn select_provider(
     endpoint: Endpoint,
@@ -265,7 +265,7 @@ For each endpoint, providers are tried in order:
 ### Configuration Structure
 
 ```rust
-// crates/finx-core/src/provider_policy.rs
+// crates/ferrotick-core/src/provider_policy.rs
 
 #[derive(Debug, Clone)]
 pub struct ProviderPolicy {
@@ -443,11 +443,11 @@ fn canonical_quote_parity() {
 
 ```bash
 # Alpha Vantage
-export FINX_ALPHAVANTAGE_API_KEY="your-key-here"
+export FERROTICK_ALPHAVANTAGE_API_KEY="your-key-here"
 
 # Alpaca
-export FINX_ALPACA_API_KEY="your-key-id-here"
-export FINX_ALPACA_SECRET_KEY="your-secret-key-here"
+export FERROTICK_ALPACA_API_KEY="your-key-id-here"
+export FERROTICK_ALPACA_SECRET_KEY="your-secret-key-here"
 ```
 
 ---
@@ -455,17 +455,17 @@ export FINX_ALPACA_SECRET_KEY="your-secret-key-here"
 ## Files to Create/Modify
 
 ### New Files:
-- `crates/finx-core/src/adapters/alphavantage.rs`
-- `crates/finx-core/src/adapters/alpaca.rs`
-- `crates/finx-core/src/provider_policy.rs`
-- `crates/finx-core/src/throttling.rs`
+- `crates/ferrotick-core/src/adapters/alphavantage.rs`
+- `crates/ferrotick-core/src/adapters/alpaca.rs`
+- `crates/ferrotick-core/src/provider_policy.rs`
+- `crates/ferrotick-core/src/throttling.rs`
 - `tests/contract/provider_contract.rs`
 
 ### Modified Files:
-- `crates/finx-core/src/adapters/mod.rs` - Add new adapters
-- `crates/finx-core/src/routing.rs` - Update scoring/routing
-- `crates/finx-core/src/lib.rs` - Export new types
-- `crates/finx-cli/src/commands/sources.rs` - Update provider list
+- `crates/ferrotick-core/src/adapters/mod.rs` - Add new adapters
+- `crates/ferrotick-core/src/routing.rs` - Update scoring/routing
+- `crates/ferrotick-core/src/lib.rs` - Export new types
+- `crates/ferrotick-cli/src/commands/sources.rs` - Update provider list
 - `README.md` - Document new providers
 
 ---

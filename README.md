@@ -1,4 +1,4 @@
-# finx
+# ferrotick
 
 Provider-neutral financial data CLI and core contracts implemented in Rust.
 
@@ -19,9 +19,9 @@ Provider-neutral financial data CLI and core contracts implemented in Rust.
 
 ## Workspace Layout
 
-- `crates/finx-core`: canonical domain types, envelope, adapters, routing.
-- `crates/finx-cli`: `finx` command-line interface.
-- `crates/finx-warehouse`: DuckDB integration, migrations, analytics views.
+- `crates/ferrotick-core`: canonical domain types, envelope, adapters, routing.
+- `crates/ferrotick-cli`: `ferrotick` command-line interface.
+- `crates/ferrotick-warehouse`: DuckDB integration, migrations, analytics views.
 - `schemas/v1`: versioned JSON schemas for machine-readable output.
 - `docs`: roadmap and RFCs.
 
@@ -40,12 +40,12 @@ cargo test
 ## Run CLI
 
 ```bash
-cargo run -p finx-cli -- quote AAPL
-cargo run -p finx-cli -- bars AAPL --interval 1d --limit 5
-cargo run -p finx-cli -- search apple --limit 5
-cargo run -p finx-cli -- schema list
-cargo run -p finx-cli -- sources
-cargo run -p finx-cli -- warehouse sync --symbol AAPL --start 2024-01-01 --end 2024-12-31
+cargo run -p ferrotick-cli -- quote AAPL
+cargo run -p ferrotick-cli -- bars AAPL --interval 1d --limit 5
+cargo run -p ferrotick-cli -- search apple --limit 5
+cargo run -p ferrotick-cli -- schema list
+cargo run -p ferrotick-cli -- sources
+cargo run -p ferrotick-cli -- warehouse sync --symbol AAPL --start 2024-01-01 --end 2024-12-31
 ```
 
 ## Output and Exit Codes
@@ -62,7 +62,7 @@ cargo run -p finx-cli -- warehouse sync --symbol AAPL --start 2024-01-01 --end 2
 
 ## Source Adapters
 
-`finx-core` uses an async adapter contract (`DataSource`) implemented via boxed futures. The router supports:
+`ferrotick-core` uses an async adapter contract (`DataSource`) implemented via boxed futures. The router supports:
 
 - `auto`: scored source selection + fallback
 - `strict`: single source without fallback
@@ -93,15 +93,15 @@ Adapters include:
 
 ## HTTP Auth Configuration
 
-`PolygonAdapter::default()` reads `FINX_POLYGON_API_KEY` for `x-api-key` auth (falls back to `demo`).
-`AlphaVantageAdapter::default()` reads `FINX_ALPHAVANTAGE_API_KEY` and appends `apikey` query auth (falls back to `demo`).
-`AlpacaAdapter::default()` reads `FINX_ALPACA_API_KEY` and `FINX_ALPHAVANTAGE_SECRET_KEY` for dual header auth (`APCA-API-KEY-ID`, `APCA-API-SECRET-KEY`, both fallback to `demo`).
+`PolygonAdapter::default()` reads `FERROTICK_POLYGON_API_KEY` for `x-api-key` auth (falls back to `demo`).
+`AlphaVantageAdapter::default()` reads `FERROTICK_ALPHAVANTAGE_API_KEY` and appends `apikey` query auth (falls back to `demo`).
+`AlpacaAdapter::default()` reads `FERROTICK_ALPACA_API_KEY` and `FERROTICK_ALPHAVANTAGE_SECRET_KEY` for dual header auth (`APCA-API-KEY-ID`, `APCA-API-SECRET-KEY`, both fallback to `demo`).
 
 Adapters can be explicitly configured in code:
 
 ```rust
 use std::sync::Arc;
-use finx_core::{HttpAuth, NoopHttpClient, PolygonAdapter};
+use ferrotick_core::{HttpAuth, NoopHttpClient, PolygonAdapter};
 
 let adapter = PolygonAdapter::with_http_client(
     Arc::new(NoopHttpClient),
@@ -127,10 +127,10 @@ The `warehouse sync` command fetches historical bars and stores them in DuckDB f
 
 ```bash
 # Sync 1 year of AAPL daily bars
-cargo run -p finx-cli -- warehouse sync --symbol AAPL --start 2024-01-01 --end 2024-12-31
+cargo run -p ferrotick-cli -- warehouse sync --symbol AAPL --start 2024-01-01 --end 2024-12-31
 
 # Query via DuckDB
-duckdb ~/.local/share/finx/warehouse.duckdb "SELECT * FROM bars WHERE symbol='AAPL' LIMIT 10"
+duckdb ~/.local/share/ferrotick/warehouse.duckdb "SELECT * FROM bars WHERE symbol='AAPL' LIMIT 10"
 ```
 
 ### Available Views
@@ -144,7 +144,7 @@ duckdb ~/.local/share/finx/warehouse.duckdb "SELECT * FROM bars WHERE symbol='AA
 Enable NDJSON streaming for AI agent consumption:
 
 ```bash
-cargo run -p finx-cli -- quote AAPL --stream
+cargo run -p ferrotick-cli -- quote AAPL --stream
 ```
 
 Stream events follow `schemas/v1/stream.event.schema.json`:

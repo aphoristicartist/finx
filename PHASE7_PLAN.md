@@ -2,7 +2,7 @@
 
 ## Overview
 
-Phase 7 focuses on performance optimization, benchmarking infrastructure, and release preparation for finx.
+Phase 7 focuses on performance optimization, benchmarking infrastructure, and release preparation for ferrotick.
 
 ## Status: Planning
 
@@ -59,8 +59,8 @@ Phase 7 focuses on performance optimization, benchmarking infrastructure, and re
 
 | Metric | Target p50 | Target p95 |
 |--------|-----------|-----------|
-| `finx --help` startup | < 100ms | < 140ms |
-| `finx quote AAPL` (cached) | < 40ms | < 80ms |
+| `ferrotick --help` startup | < 100ms | < 140ms |
+| `ferrotick quote AAPL` (cached) | < 40ms | < 80ms |
 | Parse 10k bars | < 20ms | - |
 | DuckDB query (1M rows) | < 150ms | < 300ms |
 

@@ -2,7 +2,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
-use finx_core::{
+use ferrotick_core::{
     AlpacaAdapter, AlphaVantageAdapter, BarsRequest, DataSource, FundamentalsRequest, Interval,
     PolygonAdapter, ProviderId, QuoteRequest, SearchRequest, SourceErrorKind, Symbol, YahooAdapter,
 };

@@ -1,5 +1,5 @@
 // Test library for provider contract tests
-pub use finx_core::{
+pub use ferrotick_core::{
     adapters::{AlpacaAdapter, AlphaVantageAdapter, PolygonAdapter, YahooAdapter},
     data_source::{
         BarsRequest, CapabilitySet, DataSource, Endpoint, FundamentalsBatch, FundamentalsRequest,

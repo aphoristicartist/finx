@@ -12,10 +12,10 @@ Phase 4 core functionality is **implemented and tested**. The DuckDB warehouse i
 - ✅ Canonical tables (instruments, quotes_latest, bars_1m, bars_1d, fundamentals, corporate_actions, cache_manifest, ingest_log)
 - ✅ Analytics views (vw_returns_daily, vw_volatility_20d, vw_gaps_open, vw_source_latency)
 - ✅ Query guardrails (read-only mode, max rows, timeout)
-- ✅ Cache sync command (`finx cache sync`)
+- ✅ Cache sync command (`ferrotick cache sync`)
 - ✅ All 4 unit tests passing
 
-**Critical Gap**: The `finx sql "<query>"` CLI command is **stubbed out** - it doesn't actually execute queries against the warehouse. This needs to be implemented before Phase 4 is complete.
+**Critical Gap**: The `ferrotick sql "<query>"` CLI command is **stubbed out** - it doesn't actually execute queries against the warehouse. This needs to be implemented before Phase 4 is complete.
 
 ---
 
@@ -26,7 +26,7 @@ Phase 4 core functionality is **implemented and tested**. The DuckDB warehouse i
 
 **Evidence**:
 - `Warehouse::initialize()` calls `migrations::apply_migrations()`
-- Migrations defined in `crates/finx-warehouse/src/migrations.rs`
+- Migrations defined in `crates/ferrotick-warehouse/src/migrations.rs`
 - Two migration sets:
   - `0001_core_tables`: Creates all 8 canonical tables
   - `0002_indexes`: Creates performance indexes
@@ -37,7 +37,7 @@ Phase 4 core functionality is **implemented and tested**. The DuckDB warehouse i
 - ✅ Uses `CREATE TABLE IF NOT EXISTS` pattern
 - ✅ Indexes properly defined for common query patterns
 
-**File**: `/Users/aleksandrlisenko/.openclaw/workspace/finx/crates/finx-warehouse/src/migrations.rs:1-145`
+**File**: `/Users/aleksandrlisenko/.openclaw/workspace/ferrotick/crates/ferrotick-warehouse/src/migrations.rs:1-145`
 
 ---
 
@@ -56,7 +56,7 @@ Phase 4 core functionality is **implemented and tested**. The DuckDB warehouse i
 - ✅ Uses `read_parquet()` to extract metadata from Parquet files
 - ✅ Calculates checksums based on file size + modification time
 
-**File**: `/Users/aleksandrlisenko/.openclaw/workspace/finx/crates/finx-warehouse/src/lib.rs:294-327`
+**File**: `/Users/aleksandrlisenko/.openclaw/workspace/ferrotick/crates/ferrotick-warehouse/src/lib.rs:294-327`
 
 ---
 
@@ -142,26 +142,26 @@ Phase 4 core functionality is **implemented and tested**. The DuckDB warehouse i
 - ✅ Edge cases handled (NULL checks, division by zero)
 - ✅ Names follow `vw_` convention
 
-**File**: `/Users/aleksandrlisenko/.openclaw/workspace/finx/crates/finx-warehouse/src/views.rs:1-57`
+**File**: `/Users/aleksandrlisenko/.openclaw/workspace/ferrotick/crates/ferrotick-warehouse/src/views.rs:1-57`
 
 ---
 
-### ⚠️ 5. Implement `finx sql "<query>" --format json|table|ndjson`
+### ⚠️ 5. Implement `ferrotick sql "<query>" --format json|table|ndjson`
 **Status**: **INCOMPLETE (STUBBED)**
 
 **Evidence**:
-- `crates/finx-cli/src/commands/sql.rs:1-45` contains a stub implementation
+- `crates/ferrotick-cli/src/commands/sql.rs:1-45` contains a stub implementation
 - Returns placeholder data instead of actual query results
 - Has warning message indicating stub status
 
 **Required Implementation**:
-1. Initialize `Warehouse` from `FINX_HOME`
+1. Initialize `Warehouse` from `FERROTICK_HOME`
 2. Parse query arguments from `SqlArgs`
 3. Execute query using `warehouse.execute_query()`
 4. Apply format transformation (json/table/ndjson)
 5. Return structured response
 
-**File**: `/Users/aleksandrlisenko/.openclaw/workspace/finx/crates/finx-cli/src/commands/sql.rs:1-45`
+**File**: `/Users/aleksandrlisenko/.openclaw/workspace/ferrotick/crates/ferrotick-cli/src/commands/sql.rs:1-45`
 
 ---
 
@@ -191,7 +191,7 @@ Phase 4 core functionality is **implemented and tested**. The DuckDB warehouse i
 - ✅ Clear error messages
 - ✅ Configurable via `QueryGuardrails` struct
 
-**File**: `/Users/aleksandrlisenko/.openclaw/workspace/finx/crates/finx-warehouse/src/lib.rs:107-119, 397-419`
+**File**: `/Users/aleksandrlisenko/.openclaw/workspace/ferrotick/crates/ferrotick-warehouse/src/lib.rs:107-119, 397-419`
 
 ---
 
@@ -311,12 +311,12 @@ test tests::cache_sync_is_idempotent ... ok
 ### 1. SQL Command is Stubbed
 **Severity**: HIGH (Blocking Phase 4 completion)
 
-**Location**: `crates/finx-cli/src/commands/sql.rs:1-45`
+**Location**: `crates/ferrotick-cli/src/commands/sql.rs:1-45`
 
 **Impact**: Users cannot actually execute SQL queries against the warehouse.
 
 **Fix Required**:
-1. Initialize `Warehouse` from `FINX_HOME`
+1. Initialize `Warehouse` from `FERROTICK_HOME`
 2. Call `warehouse.execute_query()` with parsed arguments
 3. Transform results into appropriate format (json/table/ndjson)
 4. Return proper `CommandResult` without warning
@@ -352,12 +352,12 @@ test tests::cache_sync_is_idempotent ... ok
 ## Recommendations
 
 ### Immediate (Before Committing Phase 4)
-1. **Implement `finx sql` command** - This is the primary blocking issue
+1. **Implement `ferrotick sql` command** - This is the primary blocking issue
 2. Add basic doc comments to public API
 3. Run full test suite: `cargo test --workspace`
 
 ### Short-term (Phase 4 completion)
-1. Add integration test for `finx sql` command
+1. Add integration test for `ferrotick sql` command
 2. Add benchmark for SQL query performance
 3. Document query guardrails in README
 
@@ -378,7 +378,7 @@ test tests::cache_sync_is_idempotent ... ok
 - Sync idempotent
 
 **Phase 4 CLI Integration**: ❌ INCOMPLETE
-- `finx sql` command is stubbed
+- `ferrotick sql` command is stubbed
 - Needs implementation before Phase 4 can be marked complete
 
 **Overall Assessment**: Core warehouse functionality is production-ready. CLI integration is the only remaining piece. Once the SQL command is implemented, Phase 4 can be committed.
@@ -387,4 +387,4 @@ test tests::cache_sync_is_idempotent ... ok
 
 **Reviewed by**: Codex (Self-Review)
 **Date**: 2026-02-17
-**Next Step**: Implement `finx sql` command or request Gemini review of current state
+**Next Step**: Implement `ferrotick sql` command or request Gemini review of current state

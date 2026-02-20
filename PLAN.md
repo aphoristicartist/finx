@@ -6,25 +6,25 @@ Add Alpha Vantage and Alpaca market data providers to complete the four-provider
 ## Requirements
 
 ### 1. Alpha Vantage Adapter
-1. Create `crates/finx-core/src/adapters/alphavantage.rs`
+1. Create `crates/ferrotick-core/src/adapters/alphavantage.rs`
 2. Implement `DataSource` trait with all four endpoints (quote, bars, fundamentals, search)
 3. Use query parameter authentication (`apikey`)
 4. Set provider score to 70 (lower than Polygon due to rate limits)
-5. Read API key from `FINX_ALPHAVANTAGE_API_KEY` environment variable, fallback to "demo"
+5. Read API key from `FERROTICK_ALPHAVANTAGE_API_KEY` environment variable, fallback to "demo"
 6. Implement rate limiting using `governor` crate (5 calls per minute for free tier)
 7. Follow existing adapter pattern from `polygon.rs` and `yahoo.rs`
 
 ### 2. Alpaca Adapter
-1. Create `crates/finx-core/src/adapters/alpaca.rs`
+1. Create `crates/ferrotick-core/src/adapters/alpaca.rs`
 2. Implement `DataSource` trait with only quote and bars endpoints (NO fundamentals or search)
 3. Use dual header authentication (`APCA-API-KEY-ID` and `APCA-API-SECRET-KEY`)
 4. Set provider score to 85 (reliable, fast)
-5. Read API key from `FINX_ALPACA_API_KEY` and secret from `FINX_ALPHAVANTAGE_SECRET_KEY` environment variables
+5. Read API key from `FERROTICK_ALPACA_API_KEY` and secret from `FERROTICK_ALPHAVANTAGE_SECRET_KEY` environment variables
 6. Follow existing adapter pattern from `polygon.rs` and `yahoo.rs`
 7. Return `SourceError::unsupported_endpoint` for fundamentals and search endpoints
 
 ### 3. Provider Policies System
-1. Create `crates/finx-core/src/provider_policy.rs`
+1. Create `crates/ferrotick-core/src/provider_policy.rs`
 2. Define `ProviderPolicy` struct with:
    - `provider_id: ProviderId`
    - `max_concurrency: usize`
@@ -39,13 +39,13 @@ Add Alpha Vantage and Alpaca market data providers to complete the four-provider
 4. Implement default policies for Alpha Vantage (1 concurrent, 5 calls/min) and Alpaca (10 concurrent, 100 calls/min)
 
 ### 4. Throttling Infrastructure
-1. Create `crates/finx-core/src/throttling.rs`
+1. Create `crates/ferrotick-core/src/throttling.rs`
 2. Implement `ThrottlingQueue` to buffer requests when rate limits are exceeded
 3. Integrate with `governor` crate for rate limiting logic
 4. Implement exponential backoff for retries
 
 ### 5. Routing Updates
-1. Update `crates/finx-core/src/routing.rs` to include Alpha Vantage and Alpaca in provider selection
+1. Update `crates/ferrotick-core/src/routing.rs` to include Alpha Vantage and Alpaca in provider selection
 2. Update provider capability matrix to reflect new providers
 3. Ensure fallback chain respects capability constraints (Alpaca not used for fundamentals/search)
 
@@ -58,9 +58,9 @@ Add Alpha Vantage and Alpaca market data providers to complete the four-provider
 3. Test canonical output parity across providers
 
 ### 7. Module Registration
-1. Update `crates/finx-core/src/adapters/mod.rs` to export new adapters
-2. Update `crates/finx-core/src/lib.rs` to export new types
-3. Update `crates/finx-cli/src/commands/sources.rs` to include new providers in output
+1. Update `crates/ferrotick-core/src/adapters/mod.rs` to export new adapters
+2. Update `crates/ferrotick-core/src/lib.rs` to export new types
+3. Update `crates/ferrotick-cli/src/commands/sources.rs` to include new providers in output
 
 ### 8. Documentation
 1. Update `README.md` with new provider information
@@ -70,17 +70,17 @@ Add Alpha Vantage and Alpaca market data providers to complete the four-provider
 ## Affected Files
 
 ### New Files:
-- `crates/finx-core/src/adapters/alphavantage.rs` — create: Alpha Vantage adapter implementation
-- `crates/finx-core/src/adapters/alpaca.rs` — create: Alpaca adapter implementation
-- `crates/finx-core/src/provider_policy.rs` — create: Per-provider policy configuration
-- `crates/finx-core/src/throttling.rs` — create: Rate limiting and throttling infrastructure
+- `crates/ferrotick-core/src/adapters/alphavantage.rs` — create: Alpha Vantage adapter implementation
+- `crates/ferrotick-core/src/adapters/alpaca.rs` — create: Alpaca adapter implementation
+- `crates/ferrotick-core/src/provider_policy.rs` — create: Per-provider policy configuration
+- `crates/ferrotick-core/src/throttling.rs` — create: Rate limiting and throttling infrastructure
 - `tests/contract/provider_contract.rs` — create: Shared contract test suite
 
 ### Modified Files:
-- `crates/finx-core/src/adapters/mod.rs` — modify: Export Alpha Vantage and Alpaca adapters
-- `crates/finx-core/src/routing.rs` — modify: Update provider selection logic
-- `crates/finx-core/src/lib.rs` — modify: Export new types (ProviderPolicy, BackoffPolicy, ThrottlingQueue)
-- `crates/finx-cli/src/commands/sources.rs` — modify: Include new providers in output
+- `crates/ferrotick-core/src/adapters/mod.rs` — modify: Export Alpha Vantage and Alpaca adapters
+- `crates/ferrotick-core/src/routing.rs` — modify: Update provider selection logic
+- `crates/ferrotick-core/src/lib.rs` — modify: Export new types (ProviderPolicy, BackoffPolicy, ThrottlingQueue)
+- `crates/ferrotick-cli/src/commands/sources.rs` — modify: Include new providers in output
 - `README.md` — modify: Document new providers and configuration
 
 ## Approach
@@ -114,4 +114,4 @@ Add Alpha Vantage and Alpaca market data providers to complete the four-provider
 - Provider health dashboard
 - Real-time rate limit monitoring
 - Automatic provider failover beyond existing circuit breaker
-- Changes to finx-warehouse or finx-cli crates beyond `sources.rs` command
+- Changes to ferrotick-warehouse or ferrotick-cli crates beyond `sources.rs` command

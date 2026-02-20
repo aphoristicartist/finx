@@ -7,7 +7,7 @@
 
 ## Context
 
-`finx` aggregates multiple providers that use different field names, numeric precision rules, and nullability conventions. Without a single canonical model, downstream cache, schema, and CLI contracts drift quickly.
+`ferrotick` aggregates multiple providers that use different field names, numeric precision rules, and nullability conventions. Without a single canonical model, downstream cache, schema, and CLI contracts drift quickly.
 
 ## Decision
 

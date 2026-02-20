@@ -1,8 +1,8 @@
 [workspace]
 members = [
-  "crates/finx-core",
-  "crates/finx-cli",
-  "crates/finx-warehouse",
+  "crates/ferrotick-core",
+  "crates/ferrotick-cli",
+  "crates/ferrotick-warehouse",
 ]
 resolver = "2"
 

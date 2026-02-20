@@ -1,0 +1,24 @@
+[package]
+name = "ferrotick-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "ferrotick command-line interface"
+
+[[bin]]
+name = "ferrotick"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+duckdb.workspace = true
+ferrotick-core = { path = "../ferrotick-core" }
+ferrotick-warehouse = { path = "../ferrotick-warehouse" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

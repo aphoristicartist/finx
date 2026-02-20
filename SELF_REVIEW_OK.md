@@ -11,14 +11,14 @@ The Phase 5 implementation has been thoroughly reviewed and found to be complete
    - ✅ All 4 endpoints implemented (quote, bars, fundamentals, search)
    - ✅ Query parameter authentication (`apikey`)
    - ✅ Provider score: 70
-   - ✅ Reads from `FINX_ALPHAVANTAGE_API_KEY` environment variable
+   - ✅ Reads from `FERROTICK_ALPHAVANTAGE_API_KEY` environment variable
    - ✅ 5 calls/min rate limiting using governor
 
 2. **Alpaca Adapter**  
    - ✅ Quote and bars endpoints only
    - ✅ Dual header authentication (`APCA-API-KEY-ID`, `APCA-API-SECRET-KEY`)
    - ✅ Provider score: 85
-   - ✅ Reads from `FINX_ALPACA_API_KEY` and `FINX_ALPHAVANTAGE_SECRET_KEY`
+   - ✅ Reads from `FERROTICK_ALPACA_API_KEY` and `FERROTICK_ALPHAVANTAGE_SECRET_KEY`
    - ✅ Returns `SourceError::unsupported_endpoint` for fundamentals/search
 
 3. **Provider Policies & Throttling**

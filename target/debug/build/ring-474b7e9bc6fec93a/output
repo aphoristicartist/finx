@@ -12,7 +12,7 @@ cargo:rerun-if-env-changed=CARGO_CFG_TARGET_OS
 cargo:rerun-if-env-changed=CARGO_CFG_TARGET_ENV
 cargo:rerun-if-env-changed=CARGO_CFG_TARGET_ENDIAN
 OPT_LEVEL = Some(0)
-OUT_DIR = Some(/private/tmp/finx-phase5/target/debug/build/ring-474b7e9bc6fec93a/out)
+OUT_DIR = Some(/Users/aleksandrlisenko/.openclaw/workspace/finx/target/debug/build/ring-474b7e9bc6fec93a/out)
 TARGET = Some(aarch64-apple-darwin)
 CARGO_ENCODED_RUSTFLAGS = Some()
 HOST = Some(aarch64-apple-darwin)
@@ -64,7 +64,7 @@ exit status: 0
 exit status: 0
 cargo:rustc-link-lib=static=ring_core_0_17_14_
 OPT_LEVEL = Some(0)
-OUT_DIR = Some(/private/tmp/finx-phase5/target/debug/build/ring-474b7e9bc6fec93a/out)
+OUT_DIR = Some(/Users/aleksandrlisenko/.openclaw/workspace/finx/target/debug/build/ring-474b7e9bc6fec93a/out)
 TARGET = Some(aarch64-apple-darwin)
 CARGO_ENCODED_RUSTFLAGS = Some()
 HOST = Some(aarch64-apple-darwin)
@@ -92,7 +92,7 @@ CFLAGS_aarch64_apple_darwin = None
 cargo:rerun-if-env-changed=CFLAGS_aarch64-apple-darwin
 CFLAGS_aarch64-apple-darwin = None
 cargo:rustc-link-lib=static=ring_core_0_17_14__test
-cargo:rustc-link-search=native=/private/tmp/finx-phase5/target/debug/build/ring-474b7e9bc6fec93a/out
+cargo:rustc-link-search=native=/Users/aleksandrlisenko/.openclaw/workspace/finx/target/debug/build/ring-474b7e9bc6fec93a/out
 cargo:rerun-if-changed=crypto/perlasm/x86_64-xlate.pl
 cargo:rerun-if-changed=crypto/perlasm/x86gas.pl
 cargo:rerun-if-changed=crypto/perlasm/x86nasm.pl

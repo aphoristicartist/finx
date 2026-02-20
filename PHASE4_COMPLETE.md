@@ -12,13 +12,13 @@ Phase 4 is now fully implemented and tested. All acceptance criteria have been m
 ### ✅ Completed Tasks
 
 1. **DuckDB file creation and migrations**
-   - Created `warehouse.duckdb` in `~/.finx/cache/`
+   - Created `warehouse.duckdb` in `~/.ferrotick/cache/`
    - Implemented migration system with version tracking
    - Two migrations: core tables and indexes
 
 2. **Register Parquet partitions into DuckDB metadata table**
    - `cache_manifest` table tracks all parquet files
-   - Automatic sync via `finx cache sync`
+   - Automatic sync via `ferrotick cache sync`
    - Stores metadata: row count, min/max timestamps, checksum
 
 3. **Build canonical DuckDB tables**
@@ -37,7 +37,7 @@ Phase 4 is now fully implemented and tested. All acceptance criteria have been m
    - ✅ vw_gaps_open
    - ✅ vw_source_latency
 
-5. **Implement `finx sql "<query>" --format json|table|ndjson`**
+5. **Implement `ferrotick sql "<query>" --format json|table|ndjson`**
    - ✅ Full SQL execution against warehouse
    - ✅ Support for --write flag
    - ✅ Read-only mode enforcement
@@ -86,17 +86,17 @@ test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured
 
 ### SQL Command
 
-The `finx sql` command now fully integrates with the DuckDB warehouse:
+The `ferrotick sql` command now fully integrates with the DuckDB warehouse:
 
 ```bash
 # Read-only query (default)
-finx sql "SELECT * FROM quotes_latest WHERE symbol = 'AAPL'"
+ferrotick sql "SELECT * FROM quotes_latest WHERE symbol = 'AAPL'"
 
 # Write query (requires --write flag)
-finx sql "CREATE TABLE custom_analysis AS SELECT * FROM bars_1d" --write
+ferrotick sql "CREATE TABLE custom_analysis AS SELECT * FROM bars_1d" --write
 
 # With custom guardrails
-finx sql "SELECT * FROM bars_1d" --max-rows 100 --query-timeout-ms 10000
+ferrotick sql "SELECT * FROM bars_1d" --max-rows 100 --query-timeout-ms 10000
 ```
 
 ### Query Guardrails
@@ -127,12 +127,12 @@ SELECT * FROM vw_source_latency WHERE source = 'polygon';
 
 ## Files Modified
 
-1. `/Users/aleksandrlisenko/.openclaw/workspace/finx/crates/finx-warehouse/src/lib.rs`
+1. `/Users/aleksandrlisenko/.openclaw/workspace/ferrotick/crates/ferrotick-warehouse/src/lib.rs`
    - Fixed DuckDB API usage
    - Removed unused imports
    - Added `let _ =` to suppress unused result warning
 
-2. `/Users/aleksandrlisenko/.openclaw/workspace/finx/crates/finx-cli/src/commands/sql.rs`
+2. `/Users/aleksandrlisenko/.openclaw/workspace/ferrotick/crates/ferrotick-cli/src/commands/sql.rs`
    - Replaced stub implementation with actual warehouse integration
    - Added proper error handling
    - Implemented truncation warnings

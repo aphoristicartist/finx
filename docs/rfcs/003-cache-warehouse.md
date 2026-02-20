@@ -11,7 +11,7 @@ The CLI must provide low-latency local reads, reproducible analytics, and reliab
 
 ## Decision
 
-Adopt a local filesystem cache rooted at `~/.finx/` (override via `FINX_HOME`) with:
+Adopt a local filesystem cache rooted at `~/.ferrotick/` (override via `FERROTICK_HOME`) with:
 - partitioned Parquet objects,
 - manifest metadata,
 - DuckDB warehouse file.
@@ -19,7 +19,7 @@ Adopt a local filesystem cache rooted at `~/.finx/` (override via `FINX_HOME`) w
 ## Directory Contract
 
 ```text
-$FINX_HOME/
+$FERROTICK_HOME/
   cache/
     parquet/
       source={source}/
