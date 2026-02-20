@@ -2,10 +2,27 @@
 
 Provider-neutral financial data CLI and core contracts implemented in Rust.
 
+## Project Status
+
+**Phase 6 Complete** - AI-Agent UX and streaming implemented.  
+**Phase 7 Planning** - Performance hardening and release preparation.
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| Phase 0 | RFCs and Contract Freeze | ✅ Complete |
+| Phase 1 | CLI Core and Domain Contracts | ✅ Complete |
+| Phase 2 | Source Adapters (Yahoo + Polygon) | ✅ Complete |
+| Phase 3 | Local Cache and Parquet Storage | ✅ Complete |
+| Phase 4 | DuckDB Warehouse and Analytics | ✅ Complete |
+| Phase 5 | Alpha Vantage + Alpaca Adapters | ✅ Complete |
+| Phase 6 | AI-Agent UX and Streaming | ✅ Complete |
+| Phase 7 | Performance Hardening and Release | 🔲 Planning |
+
 ## Workspace Layout
 
 - `crates/finx-core`: canonical domain types, envelope, adapters, routing.
 - `crates/finx-cli`: `finx` command-line interface.
+- `crates/finx-warehouse`: DuckDB integration, migrations, analytics views.
 - `schemas/v1`: versioned JSON schemas for machine-readable output.
 - `docs`: roadmap and RFCs.
 
@@ -28,6 +45,8 @@ cargo run -p finx-cli -- quote AAPL
 cargo run -p finx-cli -- bars AAPL --interval 1d --limit 5
 cargo run -p finx-cli -- search apple --limit 5
 cargo run -p finx-cli -- schema list
+cargo run -p finx-cli -- sources
+cargo run -p finx-cli -- warehouse sync --symbol AAPL --start 2024-01-01 --end 2024-12-31
 ```
 
 ## Output and Exit Codes
@@ -39,6 +58,7 @@ cargo run -p finx-cli -- schema list
   - `2`: validation/command input error
   - `3`: provider/network failure with emitted envelope errors
   - `4`: serialization/schema contract failure
+  - `5`: partial result (strict mode)
   - `10`: internal I/O/runtime error
 
 ## Source Adapters
@@ -60,6 +80,7 @@ Adapters include:
 
 - auth-capable HTTP transport abstraction (`HttpClient`, `HttpAuth`)
 - circuit breaker protection (`CircuitBreaker`)
+- rate limiting via `governor`
 - deterministic normalization into canonical models
 
 ## Capability Matrix
@@ -101,6 +122,51 @@ let adapter = PolygonAdapter::with_http_client(
   - `open` => `unhealthy` and rate unavailable
   - `half-open` => degraded if otherwise healthy
 
+## Warehouse (DuckDB)
+
+The `warehouse sync` command fetches historical bars and stores them in DuckDB for analytics:
+
+```bash
+# Sync 1 year of AAPL daily bars
+cargo run -p finx-cli -- warehouse sync --symbol AAPL --start 2024-01-01 --end 2024-12-31
+
+# Query via DuckDB
+duckdb ~/.local/share/finx/warehouse.duckdb "SELECT * FROM bars WHERE symbol='AAPL' LIMIT 10"
+```
+
+### Available Views
+
+- `v_daily_bars`: Daily OHLCV data
+- `v_quote_history`: Historical quote snapshots
+- `v_fundamentals`: Company fundamentals
+
+## AI-Agent Streaming
+
+Enable NDJSON streaming for AI agent consumption:
+
+```bash
+cargo run -p finx-cli -- quote AAPL --stream
+```
+
+Stream events follow `schemas/v1/stream.event.schema.json`:
+- `start`: Operation initiated
+- `progress`: Incremental updates
+- `chunk`: Data batch delivered
+- `end`: Operation completed
+- `error`: Error occurred
+
 ## Security Notes
 
 - `schema get` path handling is constrained to files under `schemas/v1` with canonical path checks to prevent traversal.
+- API keys are read from environment variables, never logged.
+- All HTTP requests use TLS via `rustls`.
+
+## Documentation
+
+- [Roadmap](docs/ROADMAP.md) - Full project roadmap and technical spec
+- [RFCs](docs/rfcs/) - Design documents
+- [Phase 7 Plan](PHASE7_PLAN.md) - Performance hardening and release
+
+## License
+
+MIT

@@ -28,7 +28,12 @@ pub fn sync_quotes(
             as_of: quote.as_of.format_rfc3339(),
         })
         .collect::<Vec<_>>();
-    warehouse.ingest_quotes(source.as_str(), request_id.as_str(), rows.as_slice(), latency_ms)
+    warehouse.ingest_quotes(
+        source.as_str(),
+        request_id.as_str(),
+        rows.as_slice(),
+        latency_ms,
+    )
 }
 
 pub fn sync_bars(
@@ -46,9 +51,10 @@ pub fn sync_bars(
     let request_id = format!("bars:{}", Uuid::new_v4());
     let dataset = match interval {
         Interval::OneDay => "bars_1d",
-        Interval::OneMinute | Interval::FiveMinutes | Interval::FifteenMinutes | Interval::OneHour => {
-            "bars_1m"
-        }
+        Interval::OneMinute
+        | Interval::FiveMinutes
+        | Interval::FifteenMinutes
+        | Interval::OneHour => "bars_1m",
     };
 
     let rows = bars

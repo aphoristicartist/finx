@@ -10,18 +10,10 @@ use crate::error::CliError;
 use super::CommandResult;
 
 const SCHEMA_DIR: &str = "schemas/v1";
-const KNOWN_SCHEMAS: [&str; 6] = [
-    "envelope.schema.json",
-    "quote.response.schema.json",
-    "bars.response.schema.json",
-    "fundamentals.response.schema.json",
-    "sql.response.schema.json",
-    "stream.event.schema.json",
-];
 
 #[derive(Debug, Serialize)]
 struct SchemaListResponseData {
-    schemas: Vec<&'static str>,
+    schemas: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -34,9 +26,8 @@ struct SchemaGetResponseData {
 pub fn run(args: &SchemaArgs, source_chain: Vec<ProviderId>) -> Result<CommandResult, CliError> {
     match &args.command {
         SchemaCommand::List => {
-            let data = SchemaListResponseData {
-                schemas: KNOWN_SCHEMAS.to_vec(),
-            };
+            let schemas = list_available_schema_names()?;
+            let data = SchemaListResponseData { schemas };
             Ok(CommandResult::ok(
                 serde_json::to_value(data)?,
                 source_chain.clone(),
@@ -59,6 +50,28 @@ pub fn run(args: &SchemaArgs, source_chain: Vec<ProviderId>) -> Result<CommandRe
     }
 }
 
+fn list_available_schema_names() -> Result<Vec<String>, CliError> {
+    let mut names = Vec::new();
+    for entry in fs::read_dir(SCHEMA_DIR)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+
+        let file_name = entry.file_name();
+        let Some(file_name) = file_name.to_str() else {
+            continue;
+        };
+
+        if file_name.ends_with(".json") {
+            names.push(file_name.to_owned());
+        }
+    }
+
+    names.sort();
+    Ok(names)
+}
+
 fn resolve_schema_file_name(input: &str) -> Result<String, CliError> {
     let normalized = input.trim().to_ascii_lowercase();
     let file_name = match normalized.as_str() {
@@ -69,6 +82,9 @@ fn resolve_schema_file_name(input: &str) -> Result<String, CliError> {
         "sql" => String::from("sql.response.schema.json"),
         "stream" | "stream-event" => String::from("stream.event.schema.json"),
         other if other.ends_with(".json") => other.to_owned(),
+        other if other.contains(".schema.") || other.contains(".response.") => {
+            format!("{other}.json")
+        }
         other => format!("{other}.schema.json"),
     };
 

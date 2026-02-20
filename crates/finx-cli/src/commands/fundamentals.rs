@@ -5,8 +5,8 @@ use finx_core::{Fundamental, FundamentalsRequest, SourceRouter, SourceStrategy, 
 use crate::cli::FundamentalsArgs;
 use crate::error::CliError;
 
-use super::CommandResult;
 use super::warehouse_sync;
+use super::CommandResult;
 
 #[derive(Debug, Serialize)]
 struct FundamentalsResponseData {
@@ -37,9 +37,7 @@ pub async fn run(
             )
             .err()
             .map(|error| format!("warehouse sync (fundamentals) failed: {error}"));
-            let data = serde_json::to_value(FundamentalsResponseData {
-                fundamentals,
-            })?;
+            let data = serde_json::to_value(FundamentalsResponseData { fundamentals })?;
 
             let mut result = CommandResult::ok(data, route.source_chain)
                 .with_errors(route.errors)

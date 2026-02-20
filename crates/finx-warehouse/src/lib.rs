@@ -577,11 +577,17 @@ fn is_select_like(sql: &str) -> bool {
         .next()
         .unwrap_or_default()
         .to_ascii_uppercase();
-    matches!(first_keyword.as_str(), "SELECT" | "WITH" | "EXPLAIN" | "SHOW" | "DESCRIBE")
+    matches!(
+        first_keyword.as_str(),
+        "SELECT" | "WITH" | "EXPLAIN" | "SHOW" | "DESCRIBE"
+    )
 }
 
 fn has_multiple_statements(sql: &str) -> bool {
-    sql.split(';').filter(|part| !part.trim().is_empty()).count() > 1
+    sql.split(';')
+        .filter(|part| !part.trim().is_empty())
+        .count()
+        > 1
 }
 
 fn ensure_timeout(started: Instant, timeout: Duration) -> Result<(), WarehouseError> {

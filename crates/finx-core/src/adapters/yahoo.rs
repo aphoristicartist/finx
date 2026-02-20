@@ -141,10 +141,8 @@ impl DataSource for YahooAdapter {
                 ));
             }
 
-            self.execute_authenticated_call(
-                "https://query1.finance.yahoo.com/v8/finance/chart",
-            )
-            .await?;
+            self.execute_authenticated_call("https://query1.finance.yahoo.com/v8/finance/chart")
+                .await?;
 
             let step = interval_duration(req.interval);
             let now = UtcDateTime::now().into_inner();
@@ -185,8 +183,10 @@ impl DataSource for YahooAdapter {
                 ));
             }
 
-            self.execute_authenticated_call("https://query2.finance.yahoo.com/v10/finance/quoteSummary")
-                .await?;
+            self.execute_authenticated_call(
+                "https://query2.finance.yahoo.com/v10/finance/quoteSummary",
+            )
+            .await?;
 
             let as_of = UtcDateTime::now();
             let fundamentals = req

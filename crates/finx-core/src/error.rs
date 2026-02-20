@@ -35,6 +35,8 @@ pub enum ValidationError {
 
     #[error("request_id must be at least 8 characters")]
     InvalidRequestId,
+    #[error("trace_id must be 32 hex characters")]
+    InvalidTraceId,
     #[error("schema_version must match vMAJOR.MINOR.PATCH: '{value}'")]
     InvalidSchemaVersion { value: String },
     #[error("source_chain must contain at least one source")]

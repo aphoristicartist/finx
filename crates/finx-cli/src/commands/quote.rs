@@ -5,8 +5,8 @@ use finx_core::{Quote, QuoteRequest, SourceRouter, SourceStrategy, Symbol};
 use crate::cli::QuoteArgs;
 use crate::error::CliError;
 
-use super::CommandResult;
 use super::warehouse_sync;
+use super::CommandResult;
 
 #[derive(Debug, Serialize)]
 struct QuoteResponseData {
@@ -30,13 +30,14 @@ pub async fn run(
     match router.route_quote(&request, strategy.clone()).await {
         Ok(route) => {
             let quotes = route.data.quotes;
-            let warehouse_warning =
-                warehouse_sync::sync_quotes(route.selected_source, quotes.as_slice(), route.latency_ms)
-                    .err()
-                    .map(|error| format!("warehouse sync (quote) failed: {error}"));
-            let data = serde_json::to_value(QuoteResponseData {
-                quotes,
-            })?;
+            let warehouse_warning = warehouse_sync::sync_quotes(
+                route.selected_source,
+                quotes.as_slice(),
+                route.latency_ms,
+            )
+            .err()
+            .map(|error| format!("warehouse sync (quote) failed: {error}"));
+            let data = serde_json::to_value(QuoteResponseData { quotes })?;
 
             let mut result = CommandResult::ok(data, route.source_chain)
                 .with_errors(route.errors)

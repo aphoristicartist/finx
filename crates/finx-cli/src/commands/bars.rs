@@ -5,8 +5,8 @@ use finx_core::{BarSeries, BarsRequest, Interval, SourceRouter, SourceStrategy, 
 use crate::cli::BarsArgs;
 use crate::error::CliError;
 
-use super::CommandResult;
 use super::warehouse_sync;
+use super::CommandResult;
 
 pub async fn run(
     args: &BarsArgs,

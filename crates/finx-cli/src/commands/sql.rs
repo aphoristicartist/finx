@@ -24,7 +24,11 @@ struct SqlResponseData {
     truncated: bool,
 }
 
-pub fn run(args: &SqlArgs, source_chain: Vec<ProviderId>) -> Result<CommandResult, CliError> {
+pub fn run(
+    args: &SqlArgs,
+    explain: bool,
+    source_chain: Vec<ProviderId>,
+) -> Result<CommandResult, CliError> {
     let query = args.query.trim();
     if query.is_empty() {
         return Err(CliError::Command(String::from("query must not be empty")));
@@ -69,5 +73,55 @@ pub fn run(args: &SqlArgs, source_chain: Vec<ProviderId>) -> Result<CommandResul
         ));
     }
 
+    if explain {
+        let explain_sql = format!("EXPLAIN {query}");
+        let explain_guardrails = QueryGuardrails {
+            max_rows: args.max_rows.clamp(1, 256),
+            query_timeout_ms: args.query_timeout_ms,
+        };
+
+        match warehouse.execute_query(explain_sql.as_str(), explain_guardrails, false) {
+            Ok(explain_result) => {
+                let plan_lines = explain_result
+                    .rows
+                    .iter()
+                    .map(|row| {
+                        row.iter()
+                            .map(format_sql_value)
+                            .collect::<Vec<_>>()
+                            .join(" | ")
+                    })
+                    .collect::<Vec<_>>();
+
+                if plan_lines.is_empty() {
+                    command_result =
+                        command_result.with_warning("explain: planner returned no diagnostics");
+                } else {
+                    for line in plan_lines {
+                        command_result = command_result.with_warning(format!("explain: {line}"));
+                    }
+                }
+
+                if explain_result.truncated {
+                    command_result = command_result.with_warning(
+                        "explain: diagnostics truncated by --max-rows (increase limit to view full plan)",
+                    );
+                }
+            }
+            Err(error) => {
+                command_result = command_result
+                    .with_warning(format!("explain: failed to build query plan: {error}"));
+            }
+        }
+    }
+
     Ok(command_result)
+}
+
+fn format_sql_value(value: &Value) -> String {
+    match value {
+        Value::Null => String::from("null"),
+        Value::String(text) => text.clone(),
+        _ => value.to_string(),
+    }
 }

@@ -64,7 +64,10 @@ impl CircuitBreaker {
     }
 
     pub fn allow_request(&self) -> bool {
-        let mut inner = self.inner.lock().expect("circuit breaker lock is not poisoned");
+        let mut inner = self
+            .inner
+            .lock()
+            .expect("circuit breaker lock is not poisoned");
         match inner.state {
             CircuitState::Closed | CircuitState::HalfOpen => true,
             CircuitState::Open => {
@@ -85,14 +88,20 @@ impl CircuitBreaker {
     }
 
     pub fn record_success(&self) {
-        let mut inner = self.inner.lock().expect("circuit breaker lock is not poisoned");
+        let mut inner = self
+            .inner
+            .lock()
+            .expect("circuit breaker lock is not poisoned");
         inner.state = CircuitState::Closed;
         inner.consecutive_failures = 0;
         inner.opened_at = None;
     }
 
     pub fn record_failure(&self) {
-        let mut inner = self.inner.lock().expect("circuit breaker lock is not poisoned");
+        let mut inner = self
+            .inner
+            .lock()
+            .expect("circuit breaker lock is not poisoned");
         inner.consecutive_failures = inner.consecutive_failures.saturating_add(1);
 
         if inner.state == CircuitState::HalfOpen
@@ -104,12 +113,18 @@ impl CircuitBreaker {
     }
 
     pub fn state(&self) -> CircuitState {
-        let inner = self.inner.lock().expect("circuit breaker lock is not poisoned");
+        let inner = self
+            .inner
+            .lock()
+            .expect("circuit breaker lock is not poisoned");
         inner.state
     }
 
     pub fn consecutive_failures(&self) -> u32 {
-        let inner = self.inner.lock().expect("circuit breaker lock is not poisoned");
+        let inner = self
+            .inner
+            .lock()
+            .expect("circuit breaker lock is not poisoned");
         inner.consecutive_failures
     }
 }

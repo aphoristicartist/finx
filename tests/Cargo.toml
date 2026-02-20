@@ -1,0 +1,11 @@
+[package]
+name = "finx-tests"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+finx-core = { path = "../crates/finx-core", features = ["finx-warehouse"] }
+tokio = { workspace = true }

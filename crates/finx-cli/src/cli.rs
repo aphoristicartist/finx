@@ -34,9 +34,13 @@ pub struct Cli {
     #[arg(long, global = true, default_value_t = false)]
     pub profile: bool,
 
-    /// Enable NDJSON stream mode (placeholder in this phase).
+    /// Enable NDJSON stream mode.
     #[arg(long, global = true, default_value_t = false)]
     pub stream: bool,
+
+    /// Show query plan diagnostics.
+    #[arg(long, global = true, default_value_t = false)]
+    pub explain: bool,
 
     #[command(subcommand)]
     pub command: Command,

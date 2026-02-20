@@ -25,6 +25,7 @@ impl<T> Envelope<T> {
         data: T,
         errors: Vec<EnvelopeError>,
     ) -> Result<Self, ValidationError> {
+        meta.validate_schema_compliance()?;
         for error in &errors {
             error.validate()?;
         }
@@ -63,22 +64,8 @@ impl EnvelopeMeta {
         cache_hit: bool,
     ) -> Result<Self, ValidationError> {
         let request_id = request_id.into();
-        if request_id.trim().len() < 8 {
-            return Err(ValidationError::InvalidRequestId);
-        }
-
         let schema_version = schema_version.into();
-        if !is_valid_schema_version(&schema_version) {
-            return Err(ValidationError::InvalidSchemaVersion {
-                value: schema_version,
-            });
-        }
-
-        if source_chain.is_empty() {
-            return Err(ValidationError::EmptySourceChain);
-        }
-
-        Ok(Self {
+        let meta = Self {
             request_id,
             trace_id: None,
             schema_version,
@@ -87,16 +74,49 @@ impl EnvelopeMeta {
             latency_ms,
             cache_hit,
             warnings: Vec::new(),
-        })
+        };
+        meta.validate_schema_compliance()?;
+        Ok(meta)
     }
 
-    pub fn with_trace_id(mut self, trace_id: impl Into<String>) -> Self {
-        self.trace_id = Some(trace_id.into());
-        self
+    pub fn with_trace_id(mut self, trace_id: impl Into<String>) -> Result<Self, ValidationError> {
+        let trace_id = trace_id.into();
+        if !is_valid_trace_id(trace_id.as_str()) {
+            return Err(ValidationError::InvalidTraceId);
+        }
+
+        self.trace_id = Some(trace_id);
+        self.validate_schema_compliance()?;
+        Ok(self)
     }
 
     pub fn push_warning(&mut self, warning: impl Into<String>) {
         self.warnings.push(warning.into());
+    }
+
+    /// Validates runtime metadata against `schemas/v1/envelope.schema.json` constraints.
+    pub fn validate_schema_compliance(&self) -> Result<(), ValidationError> {
+        if self.request_id.trim().len() < 8 {
+            return Err(ValidationError::InvalidRequestId);
+        }
+
+        if let Some(trace_id) = &self.trace_id {
+            if !is_valid_trace_id(trace_id.as_str()) {
+                return Err(ValidationError::InvalidTraceId);
+            }
+        }
+
+        if !is_valid_schema_version(&self.schema_version) {
+            return Err(ValidationError::InvalidSchemaVersion {
+                value: self.schema_version.clone(),
+            });
+        }
+
+        if self.source_chain.is_empty() {
+            return Err(ValidationError::EmptySourceChain);
+        }
+
+        Ok(())
     }
 }
 
@@ -170,6 +190,12 @@ fn is_valid_schema_version(value: &str) -> bool {
     })
 }
 
+fn is_valid_trace_id(value: &str) -> bool {
+    value.len() == 32
+        && value.chars().all(|ch| ch.is_ascii_hexdigit())
+        && value.chars().any(|ch| ch != '0')
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,5 +219,14 @@ mod tests {
     fn rejects_empty_error_code() {
         let err = EnvelopeError::new("", "message").expect_err("must fail");
         assert!(matches!(err, ValidationError::EmptyErrorCode));
+    }
+
+    #[test]
+    fn rejects_invalid_trace_id() {
+        let meta = EnvelopeMeta::new("request-12345", "v1.0.0", vec![ProviderId::Yahoo], 1, false)
+            .expect("meta must be valid");
+
+        let err = meta.with_trace_id("not-a-trace-id").expect_err("must fail");
+        assert!(matches!(err, ValidationError::InvalidTraceId));
     }
 }

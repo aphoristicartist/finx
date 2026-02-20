@@ -148,4 +148,3 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 fn escape_sql_string(value: &str) -> String {
     value.replace('\'', "''")
 }
-
