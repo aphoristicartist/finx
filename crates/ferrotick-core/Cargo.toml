@@ -20,7 +20,24 @@ urlencoding.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+tempfile.workspace = true
 
 [[test]]
 name = "provider_contract"
 path = "../../tests/contract/provider_contract.rs"
+
+[[test]]
+name = "cli_user_journeys"
+path = "../../tests/cli_user_journeys.rs"
+
+[[test]]
+name = "data_provider_behavior"
+path = "../../tests/data_provider_behavior.rs"
+
+[[test]]
+name = "warehouse_behavior"
+path = "../../tests/warehouse_behavior.rs"
+
+[[test]]
+name = "error_handling_security"
+path = "../../tests/error_handling_security.rs"
