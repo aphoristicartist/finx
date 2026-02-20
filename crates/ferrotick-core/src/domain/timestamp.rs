@@ -28,6 +28,17 @@ impl UtcDateTime {
         })
     }
 
+    /// Create a UtcDateTime from a Unix timestamp (seconds since epoch).
+    pub fn from_unix_timestamp(seconds: i64) -> Result<Self, ValidationError> {
+        let datetime = OffsetDateTime::from_unix_timestamp(seconds).map_err(|_| {
+            ValidationError::TimestampNotUtc {
+                value: format!("unix timestamp {seconds}"),
+            }
+        })?;
+
+        Ok(Self(datetime))
+    }
+
     pub fn from_offset_datetime(value: OffsetDateTime) -> Result<Self, ValidationError> {
         if value.offset() != UtcOffset::UTC {
             return Err(ValidationError::TimestampNotUtc {

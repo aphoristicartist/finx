@@ -10,10 +10,13 @@ description = "Core domain contracts and envelopes for ferrotick"
 duckdb.workspace = true
 ferrotick-warehouse = { path = "../ferrotick-warehouse" }
 governor.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 time.workspace = true
+tokio.workspace = true
+urlencoding.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

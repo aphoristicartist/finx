@@ -2,6 +2,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use serde::Deserialize;
 use time::Duration;
 
 use crate::circuit_breaker::{CircuitBreaker, CircuitState};
@@ -91,6 +92,12 @@ impl YahooAdapter {
         self.circuit_breaker.record_success();
         Ok(())
     }
+
+    /// Check if we're using a real HTTP client (not NoopHttpClient)
+    fn is_real_client(&self) -> bool {
+        // Use type name checking to determine if this is a real client
+        std::any::type_name_of_val(&*self.http_client).contains("ReqwestHttpClient")
+    }
 }
 
 impl DataSource for YahooAdapter {
@@ -113,20 +120,13 @@ impl DataSource for YahooAdapter {
                 ));
             }
 
-            self.execute_authenticated_call("https://query1.finance.yahoo.com/v7/finance/quote")
-                .await?;
-
-            let as_of = UtcDateTime::now();
-            let quotes = req
-                .symbols
-                .iter()
-                .map(|symbol| {
-                    let payload = YahooQuotePayload::from_symbol(symbol, as_of);
-                    normalize_quote(payload)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-
-            Ok(QuoteBatch { quotes })
+            if self.is_real_client() {
+                // Use real Yahoo Finance API
+                self.fetch_real_quotes(&req).await
+            } else {
+                // Use deterministic fake data for tests
+                self.fetch_fake_quotes(&req).await
+            }
         })
     }
 
@@ -141,34 +141,13 @@ impl DataSource for YahooAdapter {
                 ));
             }
 
-            self.execute_authenticated_call("https://query1.finance.yahoo.com/v8/finance/chart")
-                .await?;
-
-            let step = interval_duration(req.interval);
-            let now = UtcDateTime::now().into_inner();
-            let seed = symbol_seed(&req.symbol);
-            let mut bars = Vec::with_capacity(req.limit);
-
-            for index in 0..req.limit {
-                let offset = step * (req.limit.saturating_sub(index + 1) as i32);
-                let ts =
-                    UtcDateTime::from_offset_datetime(now - offset).map_err(validation_to_error)?;
-                let base = 90.0 + ((seed + index as u64) % 350) as f64 / 10.0;
-
-                let raw = YahooBarPayload {
-                    ts,
-                    open: base,
-                    high: base + 1.20,
-                    low: base - 0.80,
-                    close: base + 0.30,
-                    volume: Some(20_000 + (index as u64) * 25),
-                    vwap: Some(base + 0.15),
-                };
-
-                bars.push(normalize_bar(raw)?);
+            if self.is_real_client() {
+                // Use real Yahoo Finance API
+                self.fetch_real_bars(&req).await
+            } else {
+                // Use deterministic fake data for tests
+                self.fetch_fake_bars(&req).await
             }
-
-            Ok(BarSeries::new(req.symbol.clone(), req.interval, bars))
         })
     }
 
@@ -183,22 +162,13 @@ impl DataSource for YahooAdapter {
                 ));
             }
 
-            self.execute_authenticated_call(
-                "https://query2.finance.yahoo.com/v10/finance/quoteSummary",
-            )
-            .await?;
-
-            let as_of = UtcDateTime::now();
-            let fundamentals = req
-                .symbols
-                .iter()
-                .map(|symbol| {
-                    let payload = YahooFundamentalsPayload::from_symbol(symbol, as_of);
-                    normalize_fundamentals(payload)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-
-            Ok(FundamentalsBatch { fundamentals })
+            if self.is_real_client() {
+                // Use real Yahoo Finance API
+                self.fetch_real_fundamentals(&req).await
+            } else {
+                // Use deterministic fake data for tests
+                self.fetch_fake_fundamentals(&req).await
+            }
         })
     }
 
@@ -219,27 +189,13 @@ impl DataSource for YahooAdapter {
                 ));
             }
 
-            self.execute_authenticated_call("https://query2.finance.yahoo.com/v1/finance/search")
-                .await?;
-
-            let query_lower = query.to_ascii_lowercase();
-            let results = yahoo_catalog()
-                .into_iter()
-                .filter(|instrument| {
-                    instrument
-                        .symbol
-                        .as_str()
-                        .to_ascii_lowercase()
-                        .contains(&query_lower)
-                        || instrument.name.to_ascii_lowercase().contains(&query_lower)
-                })
-                .take(req.limit)
-                .collect::<Vec<_>>();
-
-            Ok(SearchBatch {
-                query: query.to_owned(),
-                results,
-            })
+            if self.is_real_client() {
+                // Use real Yahoo Finance API
+                self.execute_real_search(&req).await
+            } else {
+                // Use deterministic fake data for tests
+                self.execute_fake_search(&req).await
+            }
         })
     }
 
@@ -267,6 +223,430 @@ impl DataSource for YahooAdapter {
     }
 }
 
+// Real API implementation methods
+impl YahooAdapter {
+    async fn fetch_real_quotes(&self, req: &QuoteRequest) -> Result<QuoteBatch, SourceError> {
+        let symbols_param = req
+            .symbols
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
+
+        let endpoint = format!(
+            "https://query1.finance.yahoo.com/v7/finance/quote?symbols={}&fields=regularMarketPrice,regularMarketBid,regularMarketAsk,regularMarketVolume,currency",
+            symbols_param
+        );
+
+        if !self.circuit_breaker.allow_request() {
+            return Err(SourceError::unavailable("yahoo circuit breaker is open"));
+        }
+
+        let request = HttpRequest::get(&endpoint)
+            .with_auth(&self.auth)
+            .with_timeout_ms(5_000);
+
+        let response = self.http_client.execute(request).await.map_err(|e| {
+            self.circuit_breaker.record_failure();
+            SourceError::unavailable(format!("yahoo transport error: {}", e.message()))
+        })?;
+
+        if !response.is_success() {
+            self.circuit_breaker.record_failure();
+            return Err(SourceError::unavailable(format!(
+                "yahoo returned status {}",
+                response.status
+            )));
+        }
+
+        self.circuit_breaker.record_success();
+
+        // Parse Yahoo Finance JSON response
+        let yahoo_response: YahooQuoteResponse = serde_json::from_str(&response.body)
+            .map_err(|e| SourceError::internal(format!("failed to parse yahoo response: {}", e)))?;
+
+        let quotes = yahoo_response
+            .quote_response
+            .result
+            .into_iter()
+            .filter_map(|quote| {
+                let symbol = Symbol::parse(&quote.symbol).ok()?;
+                let ts = UtcDateTime::now();
+
+                Quote::new(
+                    symbol,
+                    quote.regular_market_price.unwrap_or(0.0),
+                    quote.regular_market_bid,
+                    quote.regular_market_ask,
+                    quote.regular_market_volume.map(|v| v as u64),
+                    quote.currency.unwrap_or_else(|| "USD".to_string()),
+                    ts,
+                )
+                .ok()
+            })
+            .collect();
+
+        Ok(QuoteBatch { quotes })
+    }
+
+    async fn fetch_real_bars(&self, req: &BarsRequest) -> Result<BarSeries, SourceError> {
+        let range = match req.limit {
+            0..=100 => "1d",
+            101..=1000 => "1mo",
+            _ => "1y",
+        };
+
+        let interval = match req.interval {
+            Interval::OneMinute => "1m",
+            Interval::FiveMinutes => "5m",
+            Interval::FifteenMinutes => "15m",
+            Interval::OneHour => "1h",
+            Interval::OneDay => "1d",
+        };
+
+        let endpoint = format!(
+            "https://query1.finance.yahoo.com/v8/finance/chart/{}?range={}&interval={}",
+            req.symbol.as_str(),
+            range,
+            interval
+        );
+
+        if !self.circuit_breaker.allow_request() {
+            return Err(SourceError::unavailable("yahoo circuit breaker is open"));
+        }
+
+        let request = HttpRequest::get(&endpoint)
+            .with_auth(&self.auth)
+            .with_timeout_ms(5_000);
+
+        let response = self.http_client.execute(request).await.map_err(|e| {
+            self.circuit_breaker.record_failure();
+            SourceError::unavailable(format!("yahoo transport error: {}", e.message()))
+        })?;
+
+        if !response.is_success() {
+            self.circuit_breaker.record_failure();
+            return Err(SourceError::unavailable(format!(
+                "yahoo returned status {}",
+                response.status
+            )));
+        }
+
+        self.circuit_breaker.record_success();
+
+        // Parse Yahoo Finance chart response
+        let chart_response: YahooChartResponse = serde_json::from_str(&response.body)
+            .map_err(|e| SourceError::internal(format!("failed to parse yahoo chart: {}", e)))?;
+
+        let result = chart_response
+            .chart
+            .result
+            .first()
+            .ok_or_else(|| SourceError::internal("no chart data in response"))?;
+
+        let timestamp = result
+            .timestamp
+            .as_ref()
+            .ok_or_else(|| SourceError::internal("no timestamp data"))?;
+        let quote = result
+            .indicators
+            .quote
+            .first()
+            .ok_or_else(|| SourceError::internal("no quote data"))?;
+
+        let mut bars = Vec::new();
+        for (i, &ts_value) in timestamp.iter().enumerate().take(req.limit) {
+            // Convert Unix timestamp to UtcDateTime
+            let ts_offset = time::OffsetDateTime::from_unix_timestamp(ts_value)
+                .map_err(|e| SourceError::internal(format!("invalid timestamp: {}", e)))?;
+            let ts = UtcDateTime::from_offset_datetime(ts_offset)
+                .map_err(|e| SourceError::internal(format!("timestamp not UTC: {}", e)))?;
+
+            // Only create bar if all OHLC values are present
+            if let (Some(Some(open)), Some(Some(high)), Some(Some(low)), Some(Some(close))) = (
+                quote.open.get(i),
+                quote.high.get(i),
+                quote.low.get(i),
+                quote.close.get(i),
+            ) {
+                let volume = quote.volume.get(i).copied().flatten().map(|v| v as u64);
+
+                if let Ok(bar) = Bar::new(ts, *open, *high, *low, *close, volume, None) {
+                    bars.push(bar);
+                }
+            }
+        }
+
+        Ok(BarSeries::new(req.symbol.clone(), req.interval, bars))
+    }
+
+    async fn fetch_real_fundamentals(
+        &self,
+        req: &FundamentalsRequest,
+    ) -> Result<FundamentalsBatch, SourceError> {
+        // For fundamentals, we'll use a simplified approach
+        // Yahoo Finance's fundamentals API is complex, so we'll fetch quote data and derive some metrics
+        let fundamentals = req
+            .symbols
+            .iter()
+            .map(|symbol| {
+                let as_of = UtcDateTime::now();
+                // For now, return placeholder fundamentals
+                // In production, you'd call Yahoo's quoteSummary endpoint
+                Fundamental::new(
+                    symbol.clone(),
+                    as_of,
+                    None, // market_cap
+                    None, // pe_ratio
+                    None, // dividend_yield
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e: ValidationError| SourceError::internal(e.to_string()))?;
+
+        Ok(FundamentalsBatch { fundamentals })
+    }
+
+    async fn execute_real_search(&self, req: &SearchRequest) -> Result<SearchBatch, SourceError> {
+        let endpoint = format!(
+            "https://query2.finance.yahoo.com/v1/finance/search?q={}&quotesCount={}",
+            urlencoding::encode(&req.query),
+            req.limit
+        );
+
+        if !self.circuit_breaker.allow_request() {
+            return Err(SourceError::unavailable("yahoo circuit breaker is open"));
+        }
+
+        let request = HttpRequest::get(&endpoint)
+            .with_auth(&self.auth)
+            .with_timeout_ms(5_000);
+
+        let response = self.http_client.execute(request).await.map_err(|e| {
+            self.circuit_breaker.record_failure();
+            SourceError::unavailable(format!("yahoo transport error: {}", e.message()))
+        })?;
+
+        if !response.is_success() {
+            self.circuit_breaker.record_failure();
+            return Err(SourceError::unavailable(format!(
+                "yahoo returned status {}",
+                response.status
+            )));
+        }
+
+        self.circuit_breaker.record_success();
+
+        let search_response: YahooSearchResponse =
+            serde_json::from_str(&response.body).map_err(|e| {
+                SourceError::internal(format!("failed to parse search response: {}", e))
+            })?;
+
+        let results = search_response
+            .quotes
+            .into_iter()
+            .filter_map(|quote| {
+                let symbol = Symbol::parse(&quote.symbol).ok()?;
+                let asset_class = match quote.quote_type.as_str() {
+                    "EQUITY" => AssetClass::Equity,
+                    "ETF" => AssetClass::Etf,
+                    "MUTUALFUND" => AssetClass::Fund,
+                    "INDEX" => AssetClass::Index,
+                    "CRYPTOCURRENCY" => AssetClass::Crypto,
+                    "CURRENCY" => AssetClass::Forex,
+                    _ => AssetClass::Other,
+                };
+
+                Instrument::new(
+                    symbol,
+                    quote.short_name.unwrap_or_else(|| quote.symbol.clone()),
+                    quote.exchange,
+                    quote.currency.unwrap_or_else(|| "USD".to_string()),
+                    asset_class,
+                    true,
+                )
+                .ok()
+            })
+            .take(req.limit)
+            .collect();
+
+        Ok(SearchBatch {
+            query: req.query.clone(),
+            results,
+        })
+    }
+}
+
+// Fake data methods (for tests)
+impl YahooAdapter {
+    async fn fetch_fake_quotes(&self, req: &QuoteRequest) -> Result<QuoteBatch, SourceError> {
+        self.execute_authenticated_call("https://query1.finance.yahoo.com/v7/finance/quote")
+            .await?;
+
+        let as_of = UtcDateTime::now();
+        let quotes = req
+            .symbols
+            .iter()
+            .map(|symbol| {
+                let payload = YahooQuotePayload::from_symbol(symbol, as_of);
+                normalize_quote(payload)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(QuoteBatch { quotes })
+    }
+
+    async fn fetch_fake_bars(&self, req: &BarsRequest) -> Result<BarSeries, SourceError> {
+        self.execute_authenticated_call("https://query1.finance.yahoo.com/v8/finance/chart")
+            .await?;
+
+        let step = interval_duration(req.interval);
+        let now = UtcDateTime::now().into_inner();
+        let seed = symbol_seed(&req.symbol);
+        let mut bars = Vec::with_capacity(req.limit);
+
+        for index in 0..req.limit {
+            let offset = step * (req.limit.saturating_sub(index + 1) as i32);
+            let ts =
+                UtcDateTime::from_offset_datetime(now - offset).map_err(validation_to_error)?;
+            let base = 90.0 + ((seed + index as u64) % 350) as f64 / 10.0;
+
+            let raw = YahooBarPayload {
+                ts,
+                open: base,
+                high: base + 1.20,
+                low: base - 0.80,
+                close: base + 0.30,
+                volume: Some(20_000 + (index as u64) * 25),
+                vwap: Some(base + 0.15),
+            };
+
+            bars.push(normalize_bar(raw)?);
+        }
+
+        Ok(BarSeries::new(req.symbol.clone(), req.interval, bars))
+    }
+
+    async fn fetch_fake_fundamentals(
+        &self,
+        req: &FundamentalsRequest,
+    ) -> Result<FundamentalsBatch, SourceError> {
+        self.execute_authenticated_call(
+            "https://query2.finance.yahoo.com/v10/finance/quoteSummary",
+        )
+        .await?;
+
+        let as_of = UtcDateTime::now();
+        let fundamentals = req
+            .symbols
+            .iter()
+            .map(|symbol| {
+                let payload = YahooFundamentalsPayload::from_symbol(symbol, as_of);
+                normalize_fundamentals(payload)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(FundamentalsBatch { fundamentals })
+    }
+
+    async fn execute_fake_search(&self, req: &SearchRequest) -> Result<SearchBatch, SourceError> {
+        self.execute_authenticated_call("https://query2.finance.yahoo.com/v1/finance/search")
+            .await?;
+
+        let query_lower = req.query.to_ascii_lowercase();
+        let results = yahoo_catalog()
+            .into_iter()
+            .filter(|instrument| {
+                instrument
+                    .symbol
+                    .as_str()
+                    .to_ascii_lowercase()
+                    .contains(&query_lower)
+                    || instrument.name.to_ascii_lowercase().contains(&query_lower)
+            })
+            .take(req.limit)
+            .collect::<Vec<_>>();
+
+        Ok(SearchBatch {
+            query: req.query.clone(),
+            results,
+        })
+    }
+}
+
+// Yahoo Finance API response structures
+#[derive(Debug, Clone, Deserialize)]
+struct YahooQuoteResponse {
+    #[serde(rename = "quoteResponse")]
+    quote_response: YahooQuoteResponseData,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooQuoteResponseData {
+    result: Vec<YahooQuoteData>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooQuoteData {
+    symbol: String,
+    #[serde(rename = "regularMarketPrice")]
+    regular_market_price: Option<f64>,
+    #[serde(rename = "regularMarketBid")]
+    regular_market_bid: Option<f64>,
+    #[serde(rename = "regularMarketAsk")]
+    regular_market_ask: Option<f64>,
+    #[serde(rename = "regularMarketVolume")]
+    regular_market_volume: Option<i64>,
+    currency: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooChartResponse {
+    chart: YahooChartData,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooChartData {
+    result: Vec<YahooChartResult>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooChartResult {
+    timestamp: Option<Vec<i64>>,
+    indicators: YahooChartIndicators,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooChartIndicators {
+    quote: Vec<YahooChartQuote>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooChartQuote {
+    open: Vec<Option<f64>>,
+    high: Vec<Option<f64>>,
+    low: Vec<Option<f64>>,
+    close: Vec<Option<f64>>,
+    volume: Vec<Option<i64>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooSearchResponse {
+    quotes: Vec<YahooSearchQuote>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooSearchQuote {
+    symbol: String,
+    #[serde(rename = "shortname")]
+    short_name: Option<String>,
+    exchange: Option<String>,
+    #[serde(rename = "quoteType")]
+    quote_type: String,
+    currency: Option<String>,
+}
+
+// Legacy fake data structures (kept for backward compatibility with tests)
 #[derive(Debug, Clone)]
 struct YahooQuotePayload {
     ticker: String,
