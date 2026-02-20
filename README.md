@@ -4,8 +4,7 @@ Provider-neutral financial data CLI and core contracts implemented in Rust.
 
 ## Project Status
 
-**Phase 6 Complete** - AI-Agent UX and streaming implemented.  
-**Phase 7 Planning** - Performance hardening and release preparation.
+**v1.0.0 Released** - All phases complete. Production-ready financial data CLI.
 
 | Phase | Description | Status |
 |-------|-------------|--------|
@@ -16,7 +15,7 @@ Provider-neutral financial data CLI and core contracts implemented in Rust.
 | Phase 4 | DuckDB Warehouse and Analytics | ✅ Complete |
 | Phase 5 | Alpha Vantage + Alpaca Adapters | ✅ Complete |
 | Phase 6 | AI-Agent UX and Streaming | ✅ Complete |
-| Phase 7 | Performance Hardening and Release | 🔲 Planning |
+| Phase 7 | Performance Hardening and Release | ✅ Complete |
 
 ## Workspace Layout
 
@@ -165,7 +164,7 @@ Stream events follow `schemas/v1/stream.event.schema.json`:
 
 - [Roadmap](docs/ROADMAP.md) - Full project roadmap and technical spec
 - [RFCs](docs/rfcs/) - Design documents
-- [Phase 7 Plan](PHASE7_PLAN.md) - Performance hardening and release
+- [Performance Guide](docs/PERFORMANCE.md) - Benchmarks and optimization
 
 ## License
 
