@@ -33,7 +33,7 @@ impl Default for AlpacaAdapter {
             http_client: Arc::new(NoopHttpClient),
             api_key: std::env::var("FERROTICK_ALPACA_API_KEY")
                 .unwrap_or_else(|_| String::from("demo")),
-            secret_key: std::env::var("FERROTICK_ALPHAVANTAGE_SECRET_KEY")
+            secret_key: std::env::var("FERROTICK_ALPACA_SECRET_KEY")
                 .unwrap_or_else(|_| String::from("demo")),
             circuit_breaker: Arc::new(CircuitBreaker::default()),
         }
