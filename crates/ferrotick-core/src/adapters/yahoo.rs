@@ -265,6 +265,16 @@ impl YahooAdapter {
         let yahoo_response: YahooQuoteResponse = serde_json::from_str(&response.body)
             .map_err(|e| SourceError::internal(format!("failed to parse yahoo response: {}", e)))?;
 
+        // Check for API-level errors
+        if let Some(error) = &yahoo_response.quote_response.error {
+            if !error.is_empty() {
+                return Err(SourceError::unavailable(format!(
+                    "yahoo API error: {}",
+                    error
+                )));
+            }
+        }
+
         let quotes = yahoo_response
             .quote_response
             .result
@@ -337,6 +347,16 @@ impl YahooAdapter {
         // Parse Yahoo Finance chart response
         let chart_response: YahooChartResponse = serde_json::from_str(&response.body)
             .map_err(|e| SourceError::internal(format!("failed to parse yahoo chart: {}", e)))?;
+
+        // Check for API-level errors
+        if let Some(error) = &chart_response.chart.error {
+            if !error.is_empty() {
+                return Err(SourceError::unavailable(format!(
+                    "yahoo chart API error: {}",
+                    error
+                )));
+            }
+        }
 
         let result = chart_response
             .chart
@@ -584,6 +604,8 @@ struct YahooQuoteResponse {
 #[derive(Debug, Clone, Deserialize)]
 struct YahooQuoteResponseData {
     result: Vec<YahooQuoteData>,
+    #[serde(default)]
+    error: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -608,6 +630,8 @@ struct YahooChartResponse {
 #[derive(Debug, Clone, Deserialize)]
 struct YahooChartData {
     result: Vec<YahooChartResult>,
+    #[serde(default)]
+    error: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
