@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.1.0] - 2024-02-20
+## [0.1.0] - 2026-02-20
 
 ### 🎉 Initial Release
 
@@ -80,7 +80,7 @@ The first production-ready release of Ferrotick!
 
 | Version | Date | Description |
 |---------|------|-------------|
-| 0.1.0 | 2024-02-20 | Initial release |
+| 0.1.0 | 2026-02-20 | Initial release |
 
 ---
 
