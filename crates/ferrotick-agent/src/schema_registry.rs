@@ -435,10 +435,6 @@ mod tests {
         None
     }
 
-    fn create_test_registry() -> SchemaRegistry {
-        try_create_test_registry().expect("registry should load from one of the candidate paths")
-    }
-
     #[test]
     fn registry_lists_schemas() {
         let registry = match try_create_test_registry() {
