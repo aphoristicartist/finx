@@ -1,53 +1,13 @@
-use std::fmt::{Display, Formatter};
+//! Metadata types for CLI commands.
+//!
+//! This module provides backward-compatible wrappers around ferrotick-agent
+//! metadata types with additional CLI-specific functionality.
 
 use ferrotick_core::{EnvelopeMeta, ProviderId, ValidationError};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
-/// Request identifier (UUID v4) for end-to-end request tracking.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct RequestId(Uuid);
-
-impl RequestId {
-    pub fn new_v4() -> Self {
-        Self(Uuid::new_v4())
-    }
-}
-
-impl Display for RequestId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0.hyphenated())
-    }
-}
-
-/// Distributed tracing identifier (W3C-style 16-byte hex trace id).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct TraceId(String);
-
-impl TraceId {
-    pub fn new() -> Self {
-        Self(Uuid::new_v4().simple().to_string())
-    }
-
-    pub fn as_str(&self) -> &str {
-        self.0.as_str()
-    }
-}
-
-impl Display for TraceId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.0.as_str())
-    }
-}
-
-#[cfg(test)]
-fn is_valid_trace_id(value: &str) -> bool {
-    value.len() == 32
-        && value.chars().all(|ch| ch.is_ascii_hexdigit())
-        && value.chars().any(|ch| ch != '0')
-}
+// Re-export agent metadata types for convenience
+pub use ferrotick_agent::metadata::{RequestId, TraceId};
 
 /// Canonical command metadata payload used to construct envelope metadata.
 ///
@@ -115,9 +75,13 @@ impl Metadata {
         let warnings = serde_json::to_string(&self.warnings)?;
 
         Ok(format!(
-            "{{\"request_id\":{request_id},\"trace_id\":{trace_id},\"source_chain\":{source_chain},\"latency_ms\":{},\"cache_hit\":{},\"warnings\":{warnings}}}",
+            r#"{{"request_id":{},"trace_id":{},"source_chain":{},"latency_ms":{},"cache_hit":{},"warnings":{}}}"#,
+            request_id,
+            trace_id,
+            source_chain,
             self.latency_ms,
-            if self.cache_hit { "true" } else { "false" }
+            if self.cache_hit { "true" } else { "false" },
+            warnings
         ))
     }
 }
@@ -136,20 +100,23 @@ mod tests {
     #[test]
     fn request_id_is_uuid_v4() {
         let request_id = RequestId::new_v4();
-        assert_eq!(request_id.0.get_version_num(), 4);
+        assert_eq!(request_id.as_uuid().get_version_num(), 4);
     }
 
     #[test]
     fn trace_id_matches_expected_shape() {
         let trace_id = TraceId::new();
-        assert!(is_valid_trace_id(trace_id.as_str()));
+        let s = trace_id.as_str();
+        assert_eq!(s.len(), 32);
+        assert!(s.chars().all(|ch| ch.is_ascii_hexdigit()));
+        assert!(s.chars().any(|ch| ch != '0'));
     }
 
     #[test]
     fn deterministic_json_is_stable_and_non_scientific() {
         let metadata = Metadata {
-            request_id: RequestId(Uuid::parse_str("123e4567-e89b-42d3-a456-426614174000").unwrap()),
-            trace_id: TraceId(String::from("0123456789abcdef0123456789abcdef")),
+            request_id: RequestId::parse("123e4567-e89b-42d3-a456-426614174000").unwrap(),
+            trace_id: TraceId::new_checked("0123456789abcdef0123456789abcdef").unwrap(),
             source_chain: vec![ProviderId::Yahoo, ProviderId::Polygon],
             latency_ms: 4200,
             cache_hit: true,

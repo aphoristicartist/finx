@@ -20,6 +20,9 @@ pub enum CliError {
 
     #[error(transparent)]
     Io(#[from] std::io::Error),
+
+    #[error(transparent)]
+    Stream(#[from] ferrotick_agent::stream::StreamError),
 }
 
 impl CliError {
@@ -30,6 +33,7 @@ impl CliError {
             Self::StrictModeViolation { .. } => 5,
             Self::Serialization(_) => 4,
             Self::Io(_) => 10,
+            Self::Stream(_) => 6,
         }
     }
 }

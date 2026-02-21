@@ -664,6 +664,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "duckdb",
+ "ferrotick-agent",
  "ferrotick-core",
  "ferrotick-warehouse",
  "serde",
