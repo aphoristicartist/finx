@@ -3,6 +3,7 @@ members = [
   "crates/ferrotick-core",
   "crates/ferrotick-cli",
   "crates/ferrotick-warehouse",
+  "crates/ferrotick-agent",
 ]
 resolver = "2"
 

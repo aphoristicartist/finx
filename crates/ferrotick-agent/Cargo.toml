@@ -1,0 +1,17 @@
+[package]
+name = "ferrotick-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "AI-agent UX primitives for ferrotick: JSON envelopes, NDJSON streaming, schema validation"
+
+[dependencies]
+ferrotick-core = { path = "../ferrotick-core" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
