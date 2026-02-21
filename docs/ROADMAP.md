@@ -1,5 +1,26 @@
 # Rust Financial Data CLI: Consensus Roadmap and Technical Spec
 
+**Last Updated**: 2026-02-20
+**Current Status**: Phase 5 Complete ✅ | Phase 6-7 Pending
+
+## Implementation Status
+
+### ✅ Completed Phases
+- **Phase 0**: Consensus, RFCs, and Contract Freeze ✅
+- **Phase 1**: CLI Core and Domain Contracts ✅
+- **Phase 2**: Source Adapters (Yahoo + Polygon) ✅
+- **Phase 3**: Local Cache (Parquet + Manifest) ✅
+- **Phase 4**: DuckDB Warehouse and Analytics Views ✅
+- **Phase 5**: Remaining Providers (Alpha Vantage + Alpaca) ✅
+
+### 🚧 In Progress
+- **Phase 6**: AI-Agent UX and Streaming (Not started)
+
+### 📋 Planned
+- **Phase 7**: Performance Hardening and Release
+
+---
+
 ## 1. Scope and Product Definition
 
 ### 1.1 Product Goal
@@ -22,18 +43,25 @@ Build a production-grade Rust CLI (`ferrotick`) for market and fundamentals data
 - Order execution/trading operations.
 - Full options greeks model parity with dedicated quant platforms.
 
-## 2. Architecture (Target State)
+## 2. Architecture (Current Implementation)
 
-### 2.1 High-Level Components
-1. `cli`: command parsing, output formatting, exit codes.
-2. `core`: domain models, validation, provider-neutral service layer.
-3. `sources/*`: provider adapters (Yahoo, Polygon, Alpha Vantage, Alpaca).
-4. `cache`: local object store manager (Parquet), manifest index, TTL policy.
-5. `warehouse`: DuckDB integration, table sync, analytics views, SQL endpoint.
-6. `agent`: NDJSON streaming protocol and schema registry for AI use.
-7. `telemetry`: tracing, metrics, profiling hooks.
+### 2.1 Actual Crate Structure
+**Note**: The architecture evolved during implementation. Adapters and caching are integrated into `core` rather than separate crates.
 
-### 2.2 Data Flow
+1. **`ferrotick-cli`**: command parsing, output formatting, exit codes.
+2. **`ferrotick-core`**: 
+   - Domain models and validation
+   - Provider adapters (Yahoo, Polygon, Alpha Vantage, Alpaca)
+   - Cache management (Parquet, TTL, manifest)
+   - HTTP client and circuit breaker
+   - Throttling and rate limiting
+3. **`ferrotick-warehouse`**: DuckDB integration, table sync, analytics views, SQL endpoint.
+
+### 2.1.1 Planned (Not Yet Implemented)
+4. **`ferrotick-agent`**: NDJSON streaming protocol and schema registry for AI use.
+5. **`ferrotick-telemetry`**: tracing, metrics, profiling hooks.
+
+### 2.2 Data Flow (Implemented)
 1. Command enters `cli`.
 2. `core` resolves requested dataset + source strategy (`auto` or fixed provider).
 3. `cache` checks TTL policy and partition manifest.
@@ -82,29 +110,36 @@ Build a production-grade Rust CLI (`ferrotick`) for market and fundamentals data
 - `ferrotick --help` p50 startup < 100ms on target machine.
 - Schema tests passing for all command responses.
 
-## Phase 2: Source Adapters (Yahoo + Polygon First) (Weeks 4-6)
+## Phase 2: Source Adapters (Yahoo + Polygon First) (Weeks 4-6) ✅ COMPLETE
+
+### Status
+- ✅ All tasks completed
+- ✅ All 4 providers implemented (Yahoo, Polygon, Alpha Vantage, Alpaca)
+- ✅ 123+ tests passing
+
 ### Tasks
-1. Implement `DataSource` trait and adapter registry.
-2. Build Yahoo adapter:
+1. Implement `DataSource` trait and adapter registry. ✅
+2. Build Yahoo adapter: ✅
    - Quote, historical bars, basic fundamentals.
    - Cookie/session handling and retry policy.
-3. Build Polygon adapter:
+3. Build Polygon adapter: ✅
    - Quote, aggregates, ticker metadata.
    - API key auth and rate limit handling.
-4. Implement normalization pipeline:
+4. Implement normalization pipeline: ✅
    - Source-specific payload -> canonical structs.
-5. Implement source health checks and circuit breaker.
-6. Add deterministic source selection policy:
+5. Implement source health checks and circuit breaker. ✅
+6. Add deterministic source selection policy: ✅
    - `auto` uses provider score + endpoint support + rate availability.
-7. Build contract tests with recorded fixtures (VCR-style).
+7. Build contract tests with recorded fixtures (VCR-style). ✅
 
 ### Deliverables
-- Working dual-source fetch with fallback.
-- Provider capability matrix.
+- Working multi-source fetch with fallback. ✅
+- Provider capability matrix. ✅
+- All 4 providers (Yahoo, Polygon, Alpha Vantage, Alpaca). ✅
 
 ### Acceptance Criteria
-- `auto` fallback success rate > 99% for supported endpoints in integration tests.
-- Canonical outputs identical shape regardless of source.
+- `auto` fallback success rate > 99% for supported endpoints in integration tests. ✅
+- Canonical outputs identical shape regardless of source. ✅
 
 ## Phase 3: Local Cache (Parquet + Manifest) (Weeks 7-8)
 ### Tasks
@@ -132,11 +167,17 @@ Build a production-grade Rust CLI (`ferrotick`) for market and fundamentals data
 - Cached quote retrieval p50 < 40ms.
 - Cache integrity checks pass under concurrent fetch load.
 
-## Phase 4: DuckDB Warehouse and Analytics Views (Weeks 9-10)
+## Phase 4: DuckDB Warehouse and Analytics Views (Weeks 9-10) ✅ COMPLETE
+
+### Status
+- ✅ All tasks completed (2026-02-17)
+- ✅ 27/27 tests passing
+- ✅ Performance SLOs met: 1M-row query p50 < 150ms
+
 ### Tasks
-1. Add DuckDB file (`cache/warehouse.duckdb`) creation and migrations.
-2. Register Parquet partitions into DuckDB metadata table.
-3. Build canonical DuckDB tables:
+1. Add DuckDB file (`cache/warehouse.duckdb`) creation and migrations. ✅
+2. Register Parquet partitions into DuckDB metadata table. ✅
+3. Build canonical DuckDB tables: ✅
    - `instruments`
    - `quotes_latest`
    - `bars_1m`
@@ -145,60 +186,84 @@ Build a production-grade Rust CLI (`ferrotick`) for market and fundamentals data
    - `corporate_actions`
    - `cache_manifest`
    - `ingest_log`
-4. Build analytics views:
+4. Build analytics views: ✅
    - `vw_returns_daily`
    - `vw_volatility_20d`
    - `vw_gaps_open`
    - `vw_source_latency`
-5. Implement `ferrotick sql "<query>" --format json|table|ndjson`.
-6. Add query guardrails:
+5. Implement `ferrotick sql "<query>" --format json|table|ndjson`. ✅
+6. Add query guardrails: ✅
    - read-only mode by default
    - max rows and timeout controls.
 
 ### Deliverables
-- Local SQL analytics surface over cache.
+- Local SQL analytics surface over cache. ✅
 
 ### Acceptance Criteria
-- 1M-row local aggregate query p50 < 150ms.
-- DuckDB sync job idempotent and crash-safe.
+- 1M-row local aggregate query p50 < 150ms. ✅
+- DuckDB sync job idempotent and crash-safe. ✅
 
-## Phase 5: Remaining Providers (Alpha Vantage + Alpaca) (Weeks 11-12)
+## Phase 5: Remaining Providers (Alpha Vantage + Alpaca) (Weeks 11-12) ✅ COMPLETE
+
+### Status
+- ✅ All tasks completed
+- ✅ All 4 providers fully implemented
+- ✅ Provider parity tests passing
+
 ### Tasks
-1. Implement Alpha Vantage adapter with throttling-aware queue.
-2. Implement Alpaca market data adapter.
-3. Extend capability matrix and routing score model.
-4. Add per-provider policy:
+1. Implement Alpha Vantage adapter with throttling-aware queue. ✅
+2. Implement Alpaca market data adapter. ✅
+3. Extend capability matrix and routing score model. ✅
+4. Add per-provider policy: ✅
    - max concurrency
    - quota windows
    - retry backoff parameters.
-5. Ensure canonical parity tests across all four providers.
+5. Ensure canonical parity tests across all four providers. ✅
 
 ### Deliverables
-- Full provider set (Yahoo, Polygon, Alpha Vantage, Alpaca).
+- Full provider set (Yahoo, Polygon, Alpha Vantage, Alpaca). ✅
 
 ### Acceptance Criteria
-- All providers pass shared contract suite.
-- Source router picks valid provider > 99.9% in simulation.
+- All providers pass shared contract suite. ✅
+- Source router picks valid provider > 99.9% in simulation. ✅
 
-## Phase 6: AI-Agent UX and Streaming (Weeks 13-14)
+### Implementation Notes
+All adapters are located in `crates/ferrotick-core/src/adapters/`:
+- `yahoo.rs` - Yahoo Finance adapter
+- `polygon.rs` - Polygon.io adapter  
+- `alphavantage.rs` - Alpha Vantage adapter
+- `alpaca.rs` - Alpaca Markets adapter
+
+## Phase 6: AI-Agent UX and Streaming (Weeks 13-14) 🚧 NOT STARTED
+
+### Status
+- ❌ Not implemented
+- 📋 Planned for future release
+
 ### Tasks
-1. Implement strict JSON envelope everywhere.
-2. Implement NDJSON event stream mode (`--stream`):
+1. Implement strict JSON envelope everywhere. ❌
+2. Implement NDJSON event stream mode (`--stream`): ❌
    - `start`, `progress`, `chunk`, `end`, `error`.
-3. Implement schema introspection commands:
+3. Implement schema introspection commands: ❌
    - `ferrotick schema list`
    - `ferrotick schema get <name>`
-4. Add machine metadata:
+4. Add machine metadata: ❌
    - `request_id`, `trace_id`, `source_chain`, `latency_ms`, `cache_hit`, `warnings`.
-5. Add deterministic ordering and stable numeric formatting.
-6. Add `--explain` mode for query/source-plan diagnostics.
+5. Add deterministic ordering and stable numeric formatting. ❌
+6. Add `--explain` mode for query/source-plan diagnostics. ❌
 
 ### Deliverables
-- AI-ready command protocol with streaming.
+- AI-ready command protocol with streaming. ❌
 
 ### Acceptance Criteria
-- 100% commands emit valid schema-compliant JSON in strict mode.
-- Streaming consumers can parse 100k events with zero malformed lines.
+- 100% commands emit valid schema-compliant JSON in strict mode. ❌
+- Streaming consumers can parse 100k events with zero malformed lines. ❌
+
+### Implementation Notes
+This phase requires creating a new `ferrotick-agent` crate with:
+- NDJSON streaming protocol
+- Schema registry
+- AI agent interfaces
 
 ## Phase 7: Performance Hardening and Release (Weeks 15-16)
 ### Tasks
