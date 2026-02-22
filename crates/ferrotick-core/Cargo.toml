@@ -8,6 +8,7 @@ description = "Core domain contracts and envelopes for ferrotick"
 
 [dependencies]
 duckdb.workspace = true
+fastrand = "2.3"
 ferrotick-warehouse = { path = "../ferrotick-warehouse" }
 governor.workspace = true
 reqwest.workspace = true

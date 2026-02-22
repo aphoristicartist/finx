@@ -3,6 +3,7 @@ use std::fmt::{Display, Formatter};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use reqwest::cookie::Jar;
 
 /// Minimal HTTP method set needed by provider adapters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,6 +150,12 @@ pub trait HttpClient: Send + Sync {
         &'a self,
         request: HttpRequest,
     ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, HttpError>> + Send + 'a>>;
+
+    /// Returns true if this is a mock/test client that doesn't make real HTTP calls.
+    /// Default implementation returns false (real client).
+    fn is_mock(&self) -> bool {
+        false
+    }
 }
 
 /// Default no-op transport for deterministic offline tests.
@@ -163,31 +170,44 @@ impl HttpClient for NoopHttpClient {
         let _ = request;
         Box::pin(async move { Ok(HttpResponse::ok_json("{}")) })
     }
+
+    fn is_mock(&self) -> bool {
+        true
+    }
 }
 
 /// Production HTTP client using reqwest for real API calls.
 #[derive(Debug, Clone)]
 pub struct ReqwestHttpClient {
     client: Arc<reqwest::Client>,
+    _cookie_jar: Arc<Jar>, // Keep the jar alive for the lifetime of the client
 }
 
 impl ReqwestHttpClient {
     /// Create a new ReqwestHttpClient with default configuration.
+    /// Enables cookie store for maintaining session cookies across requests.
     pub fn new() -> Self {
+        let cookie_jar = Arc::new(Jar::default());
+        let client = Arc::new(
+            reqwest::Client::builder()
+                .cookie_provider(cookie_jar.clone())
+                .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+                .build()
+                .expect("failed to build reqwest client"),
+        );
         Self {
-            client: Arc::new(
-                reqwest::Client::builder()
-                    .user_agent("ferrotick/0.1.0")
-                    .build()
-                    .unwrap_or_else(|_| reqwest::Client::new()),
-            ),
+            client,
+            _cookie_jar: cookie_jar,
         }
     }
 
     /// Create a ReqwestHttpClient with a custom reqwest::Client.
+    /// Note: For proper authentication, the provided client should have
+    /// a cookie jar configured.
     pub fn with_client(client: reqwest::Client) -> Self {
         Self {
             client: Arc::new(client),
+            _cookie_jar: Arc::new(Jar::default()),
         }
     }
 }

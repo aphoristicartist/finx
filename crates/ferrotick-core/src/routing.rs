@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::env;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -9,6 +10,7 @@ use crate::data_source::{
     BarsRequest, CapabilitySet, DataSource, Endpoint, FundamentalsBatch, FundamentalsRequest,
     HealthState, HealthStatus, QuoteBatch, QuoteRequest, SearchBatch, SearchRequest, SourceError,
 };
+use crate::http_client::{HttpAuth, ReqwestHttpClient};
 use crate::{BarSeries, EnvelopeError, ProviderId};
 
 /// Source selection strategy for routing.
@@ -88,6 +90,206 @@ impl Default for SourceRouter {
             Arc::new(AlphaVantageAdapter::default()),
             Arc::new(YahooAdapter::default()),
         ])
+    }
+}
+
+/// Builder for creating a SourceRouter with real HTTP clients.
+///
+/// This builder reads API keys from environment variables and creates
+/// adapters with real HTTP clients for production use.
+///
+/// # Environment Variables
+///
+/// | Provider | Primary Env Var | Fallback Env Var |
+/// |----------|----------------|------------------|
+/// | Polygon | `FERROTICK_POLYGON_API_KEY` | `POLYGON_API_KEY` |
+/// | Alpaca | `FERROTICK_ALPACA_API_KEY` | `ALPACA_API_KEY` |
+/// | Alpaca Secret | `FERROTICK_ALPACA_SECRET_KEY` | `ALPACA_SECRET_KEY` |
+/// | Alpha Vantage | `FERROTICK_ALPHAVANTAGE_API_KEY` | `ALPHAVANTAGE_API_KEY` |
+/// | Yahoo | (no key required) | - |
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use ferrotick_core::SourceRouterBuilder;
+///
+/// // Build with real HTTP clients (reads from env vars)
+/// let router = SourceRouterBuilder::new()
+///     .with_real_clients()
+///     .build();
+///
+/// // Or explicitly use mock mode
+/// let mock_router = SourceRouterBuilder::new()
+///     .with_mock_mode()
+///     .build();
+/// ```
+#[derive(Debug, Default)]
+pub struct SourceRouterBuilder {
+    use_mock: bool,
+    polygon_api_key: Option<String>,
+    alpaca_api_key: Option<String>,
+    alpaca_secret_key: Option<String>,
+    alphavantage_api_key: Option<String>,
+    enable_polygon: bool,
+    enable_alpaca: bool,
+    enable_alphavantage: bool,
+    enable_yahoo: bool,
+}
+
+impl SourceRouterBuilder {
+    /// Create a new builder with default settings.
+    pub fn new() -> Self {
+        Self {
+            use_mock: false,
+            polygon_api_key: None,
+            alpaca_api_key: None,
+            alpaca_secret_key: None,
+            alphavantage_api_key: None,
+            enable_polygon: true,
+            enable_alpaca: true,
+            enable_alphavantage: true,
+            enable_yahoo: true,
+        }
+    }
+
+    /// Enable mock mode - all adapters use NoopHttpClient with deterministic data.
+    ///
+    /// This is useful for testing without making real API calls.
+    pub fn with_mock_mode(mut self) -> Self {
+        self.use_mock = true;
+        self
+    }
+
+    /// Configure adapters to use real HTTP clients.
+    ///
+    /// Reads API keys from environment variables. Providers without API keys
+    /// will use mock mode for that provider only (except Yahoo which doesn't need a key).
+    pub fn with_real_clients(mut self) -> Self {
+        self.use_mock = false;
+        self.polygon_api_key = env::var("FERROTICK_POLYGON_API_KEY")
+            .or_else(|_| env::var("POLYGON_API_KEY"))
+            .ok();
+        self.alpaca_api_key = env::var("FERROTICK_ALPACA_API_KEY")
+            .or_else(|_| env::var("ALPACA_API_KEY"))
+            .ok();
+        self.alpaca_secret_key = env::var("FERROTICK_ALPACA_SECRET_KEY")
+            .or_else(|_| env::var("ALPACA_SECRET_KEY"))
+            .ok();
+        self.alphavantage_api_key = env::var("FERROTICK_ALPHAVANTAGE_API_KEY")
+            .or_else(|_| env::var("ALPHAVANTAGE_API_KEY"))
+            .ok();
+        self
+    }
+
+    /// Manually set the Polygon API key.
+    pub fn with_polygon_key(mut self, key: impl Into<String>) -> Self {
+        self.polygon_api_key = Some(key.into());
+        self
+    }
+
+    /// Manually set the Alpaca API credentials.
+    pub fn with_alpaca_keys(mut self, api_key: impl Into<String>, secret_key: impl Into<String>) -> Self {
+        self.alpaca_api_key = Some(api_key.into());
+        self.alpaca_secret_key = Some(secret_key.into());
+        self
+    }
+
+    /// Manually set the Alpha Vantage API key.
+    pub fn with_alphavantage_key(mut self, key: impl Into<String>) -> Self {
+        self.alphavantage_api_key = Some(key.into());
+        self
+    }
+
+    /// Enable or disable the Polygon adapter.
+    pub fn with_polygon_enabled(mut self, enabled: bool) -> Self {
+        self.enable_polygon = enabled;
+        self
+    }
+
+    /// Enable or disable the Alpaca adapter.
+    pub fn with_alpaca_enabled(mut self, enabled: bool) -> Self {
+        self.enable_alpaca = enabled;
+        self
+    }
+
+    /// Enable or disable the Alpha Vantage adapter.
+    pub fn with_alphavantage_enabled(mut self, enabled: bool) -> Self {
+        self.enable_alphavantage = enabled;
+        self
+    }
+
+    /// Enable or disable the Yahoo adapter.
+    pub fn with_yahoo_enabled(mut self, enabled: bool) -> Self {
+        self.enable_yahoo = enabled;
+        self
+    }
+
+    /// Build the SourceRouter with the configured adapters.
+    pub fn build(self) -> SourceRouter {
+        let mut adapters: Vec<Arc<dyn DataSource>> = Vec::new();
+
+        if self.enable_polygon {
+            adapters.push(if self.use_mock {
+                Arc::new(PolygonAdapter::default())
+            } else if let Some(key) = &self.polygon_api_key {
+                let http_client = Arc::new(ReqwestHttpClient::new());
+                Arc::new(PolygonAdapter::with_http_client(
+                    http_client,
+                    HttpAuth::Header {
+                        name: String::from("X-API-Key"),
+                        value: key.clone(),
+                    },
+                ))
+            } else {
+                // No API key available, use mock but with a warning capability
+                Arc::new(PolygonAdapter::default())
+            });
+        }
+
+        if self.enable_alpaca {
+            adapters.push(if self.use_mock {
+                Arc::new(AlpacaAdapter::default())
+            } else if let (Some(api_key), Some(secret_key)) = (&self.alpaca_api_key, &self.alpaca_secret_key) {
+                let http_client = Arc::new(ReqwestHttpClient::new());
+                Arc::new(AlpacaAdapter::with_http_client(
+                    http_client,
+                    api_key.clone(),
+                    secret_key.clone(),
+                ))
+            } else {
+                Arc::new(AlpacaAdapter::default())
+            });
+        }
+
+        if self.enable_alphavantage {
+            adapters.push(if self.use_mock {
+                Arc::new(AlphaVantageAdapter::default())
+            } else if let Some(key) = &self.alphavantage_api_key {
+                let http_client = Arc::new(ReqwestHttpClient::new());
+                Arc::new(AlphaVantageAdapter::with_http_client(http_client, key.clone()))
+            } else {
+                Arc::new(AlphaVantageAdapter::default())
+            });
+        }
+
+        if self.enable_yahoo {
+            adapters.push(if self.use_mock {
+                Arc::new(YahooAdapter::default())
+            } else {
+                let http_client = Arc::new(ReqwestHttpClient::new());
+                Arc::new(YahooAdapter::with_http_client(
+                    http_client,
+                    HttpAuth::Cookie(String::new()), // Yahoo works with anonymous access
+                ))
+            });
+        }
+
+        if adapters.is_empty() {
+            // Fallback to all mocks if nothing is enabled
+            SourceRouter::default()
+        } else {
+            SourceRouter::new(adapters)
+        }
     }
 }
 

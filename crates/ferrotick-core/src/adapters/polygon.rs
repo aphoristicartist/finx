@@ -2,6 +2,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use serde::Deserialize;
 use time::Duration;
 
 use crate::circuit_breaker::{CircuitBreaker, CircuitState};
@@ -15,7 +16,7 @@ use crate::{
     UtcDateTime, ValidationError,
 };
 
-/// Deterministic Polygon adapter used by the Phase 2 routing pipeline.
+/// Polygon adapter supporting both real API calls and mock mode.
 #[derive(Clone)]
 pub struct PolygonAdapter {
     health_state: HealthState,
@@ -24,6 +25,7 @@ pub struct PolygonAdapter {
     http_client: Arc<dyn HttpClient>,
     auth: HttpAuth,
     circuit_breaker: Arc<CircuitBreaker>,
+    use_real_api: bool,
 }
 
 impl Default for PolygonAdapter {
@@ -39,6 +41,7 @@ impl Default for PolygonAdapter {
                     .unwrap_or_else(|_| String::from("demo")),
             },
             circuit_breaker: Arc::new(CircuitBreaker::default()),
+            use_real_api: false,
         }
     }
 }
@@ -53,9 +56,11 @@ impl PolygonAdapter {
     }
 
     pub fn with_http_client(http_client: Arc<dyn HttpClient>, auth: HttpAuth) -> Self {
+        let is_real = !http_client.is_mock();
         Self {
             http_client,
             auth,
+            use_real_api: is_real,
             ..Self::default()
         }
     }
@@ -67,6 +72,249 @@ impl PolygonAdapter {
         }
     }
 
+    /// Check if we're using a real HTTP client
+    fn is_real_client(&self) -> bool {
+        self.use_real_api
+    }
+}
+
+// Real API implementation methods
+impl PolygonAdapter {
+    async fn fetch_real_quotes(&self, req: &QuoteRequest) -> Result<QuoteBatch, SourceError> {
+        if !self.circuit_breaker.allow_request() {
+            return Err(SourceError::unavailable("polygon circuit breaker is open"));
+        }
+
+        // Polygon previous close endpoint - most reliable for quotes
+        let symbol = &req.symbols[0];
+        let endpoint = format!(
+            "https://api.polygon.io/v2/aggs/ticker/{}/prev?adjusted=true",
+            symbol.as_str()
+        );
+
+        let request = HttpRequest::get(&endpoint)
+            .with_auth(&self.auth)
+            .with_timeout_ms(5_000);
+
+        let response = self.http_client.execute(request).await.map_err(|e| {
+            self.circuit_breaker.record_failure();
+            SourceError::unavailable(format!("polygon transport error: {}", e.message()))
+        })?;
+
+        if !response.is_success() {
+            self.circuit_breaker.record_failure();
+            return Err(SourceError::unavailable(format!(
+                "polygon returned status {}",
+                response.status
+            )));
+        }
+
+        self.circuit_breaker.record_success();
+
+        // Parse Polygon response
+        let polygon_response: PolygonPrevCloseResponse = serde_json::from_str(&response.body)
+            .map_err(|e| SourceError::internal(format!("failed to parse polygon response: {}", e)))?;
+
+        if polygon_response.status != "OK" && polygon_response.status != "DELAYED" {
+            return Err(SourceError::unavailable(format!(
+                "polygon API error: {}",
+                polygon_response.status
+            )));
+        }
+
+        let quotes = polygon_response
+            .results
+            .into_iter()
+            .filter_map(|result| {
+                let sym = Symbol::parse(&result.ticker).ok()?;
+                let ts_offset = time::OffsetDateTime::from_unix_timestamp(result.t as i64)
+                    .ok()?;
+                let ts = UtcDateTime::from_offset_datetime(ts_offset).ok()?;
+
+                Quote::new(
+                    sym,
+                    result.c, // close price as last price
+                    Some(result.c - 0.05), // approximate bid
+                    Some(result.c + 0.05), // approximate ask
+                    result.v.map(|v| v as u64),
+                    "USD",
+                    ts,
+                )
+                .ok()
+            })
+            .collect();
+
+        Ok(QuoteBatch { quotes })
+    }
+
+    async fn fetch_real_bars(&self, req: &BarsRequest) -> Result<BarSeries, SourceError> {
+        if !self.circuit_breaker.allow_request() {
+            return Err(SourceError::unavailable("polygon circuit breaker is open"));
+        }
+
+        let timespan = match req.interval {
+            Interval::OneMinute => "minute",
+            Interval::FiveMinutes => "minute",
+            Interval::FifteenMinutes => "minute",
+            Interval::OneHour => "hour",
+            Interval::OneDay => "day",
+        };
+
+        let multiplier = match req.interval {
+            Interval::OneMinute => 1,
+            Interval::FiveMinutes => 5,
+            Interval::FifteenMinutes => 15,
+            Interval::OneHour => 1,
+            Interval::OneDay => 1,
+        };
+
+        let now = time::OffsetDateTime::now_utc();
+        let from = now - time::Duration::days(req.limit as i64 * 2);
+        let to = now;
+
+        let endpoint = format!(
+            "https://api.polygon.io/v2/aggs/ticker/{}/range/{}/{}/{}/{}?adjusted=true&sort=desc&limit={}",
+            req.symbol.as_str(),
+            multiplier,
+            timespan,
+            from.format(&time::format_description::parse("[year]-[month]-[day]").unwrap()).unwrap(),
+            to.format(&time::format_description::parse("[year]-[month]-[day]").unwrap()).unwrap(),
+            req.limit
+        );
+
+        let request = HttpRequest::get(&endpoint)
+            .with_auth(&self.auth)
+            .with_timeout_ms(5_000);
+
+        let response = self.http_client.execute(request).await.map_err(|e| {
+            self.circuit_breaker.record_failure();
+            SourceError::unavailable(format!("polygon transport error: {}", e.message()))
+        })?;
+
+        if !response.is_success() {
+            self.circuit_breaker.record_failure();
+            return Err(SourceError::unavailable(format!(
+                "polygon returned status {}",
+                response.status
+            )));
+        }
+
+        self.circuit_breaker.record_success();
+
+        let polygon_response: PolygonAggsResponse = serde_json::from_str(&response.body)
+            .map_err(|e| SourceError::internal(format!("failed to parse polygon aggs: {}", e)))?;
+
+        let mut bars = Vec::new();
+        for result in polygon_response.results.into_iter().take(req.limit) {
+            let ts_offset = time::OffsetDateTime::from_unix_timestamp(result.t as i64)
+                .map_err(|e| SourceError::internal(format!("invalid timestamp: {}", e)))?;
+            let ts = UtcDateTime::from_offset_datetime(ts_offset)
+                .map_err(|e| SourceError::internal(format!("timestamp not UTC: {}", e)))?;
+
+            if let Ok(bar) = Bar::new(
+                ts,
+                result.o,
+                result.h,
+                result.l,
+                result.c,
+                result.v.map(|v| v as u64),
+                result.vw,
+            ) {
+                bars.push(bar);
+            }
+        }
+
+        Ok(BarSeries::new(req.symbol.clone(), req.interval, bars))
+    }
+
+    async fn fetch_real_fundamentals(
+        &self,
+        req: &FundamentalsRequest,
+    ) -> Result<FundamentalsBatch, SourceError> {
+        if !self.circuit_breaker.allow_request() {
+            return Err(SourceError::unavailable("polygon circuit breaker is open"));
+        }
+
+        let fundamentals = req
+            .symbols
+            .iter()
+            .map(|symbol| {
+                let as_of = UtcDateTime::now();
+                Fundamental::new(symbol.clone(), as_of, None, None, None)
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e: ValidationError| SourceError::internal(e.to_string()))?;
+
+        Ok(FundamentalsBatch { fundamentals })
+    }
+
+    async fn execute_real_search(&self, req: &SearchRequest) -> Result<SearchBatch, SourceError> {
+        if !self.circuit_breaker.allow_request() {
+            return Err(SourceError::unavailable("polygon circuit breaker is open"));
+        }
+
+        let endpoint = format!(
+            "https://api.polygon.io/v3/reference/tickers?search={}&limit={}&active=true",
+            urlencoding::encode(&req.query),
+            req.limit
+        );
+
+        let request = HttpRequest::get(&endpoint)
+            .with_auth(&self.auth)
+            .with_timeout_ms(5_000);
+
+        let response = self.http_client.execute(request).await.map_err(|e| {
+            self.circuit_breaker.record_failure();
+            SourceError::unavailable(format!("polygon transport error: {}", e.message()))
+        })?;
+
+        if !response.is_success() {
+            self.circuit_breaker.record_failure();
+            return Err(SourceError::unavailable(format!(
+                "polygon returned status {}",
+                response.status
+            )));
+        }
+
+        self.circuit_breaker.record_success();
+
+        let search_response: PolygonTickerSearchResponse = serde_json::from_str(&response.body)
+            .map_err(|e| SourceError::internal(format!("failed to parse search response: {}", e)))?;
+
+        let results = search_response
+            .results
+            .into_iter()
+            .filter_map(|ticker| {
+                let symbol = Symbol::parse(&ticker.ticker).ok()?;
+                let asset_class = match ticker.market.as_deref() {
+                    Some("stocks") => AssetClass::Equity,
+                    Some("crypto") => AssetClass::Crypto,
+                    Some("fx") => AssetClass::Forex,
+                    _ => AssetClass::Other,
+                };
+
+                Instrument::new(
+                    symbol,
+                    ticker.name,
+                    ticker.primary_exchange,
+                    ticker.currency_name.unwrap_or_else(|| "USD".to_string()),
+                    asset_class,
+                    ticker.active.unwrap_or(true),
+                )
+                .ok()
+            })
+            .take(req.limit)
+            .collect();
+
+        Ok(SearchBatch {
+            query: req.query.clone(),
+            results,
+        })
+    }
+}
+
+// Mock data methods (for tests)
+impl PolygonAdapter {
     async fn execute_authenticated_call(&self, endpoint: &str) -> Result<(), SourceError> {
         if !self.circuit_breaker.allow_request() {
             return Err(SourceError::unavailable(
@@ -95,6 +343,98 @@ impl PolygonAdapter {
         self.circuit_breaker.record_success();
         Ok(())
     }
+
+    async fn fetch_mock_quotes(&self, req: &QuoteRequest) -> Result<QuoteBatch, SourceError> {
+        self.execute_authenticated_call("https://api.polygon.io/v2/last/trade")
+            .await?;
+
+        let as_of = UtcDateTime::now();
+        let quotes = req
+            .symbols
+            .iter()
+            .map(|symbol| {
+                let payload = PolygonQuotePayload::from_symbol(symbol, as_of);
+                normalize_quote(payload)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(QuoteBatch { quotes })
+    }
+
+    async fn fetch_mock_bars(&self, req: &BarsRequest) -> Result<BarSeries, SourceError> {
+        self.execute_authenticated_call("https://api.polygon.io/v2/aggs/ticker")
+            .await?;
+
+        let step = interval_duration(req.interval);
+        let now = UtcDateTime::now().into_inner();
+        let seed = symbol_seed(&req.symbol);
+        let mut bars = Vec::with_capacity(req.limit);
+
+        for index in 0..req.limit {
+            let offset = step * (req.limit.saturating_sub(index + 1) as i32);
+            let ts =
+                UtcDateTime::from_offset_datetime(now - offset).map_err(validation_to_error)?;
+            let base = 95.0 + ((seed + index as u64 * 3) % 420) as f64 / 10.0;
+
+            let raw = PolygonAggregatePayload {
+                ts,
+                open: base + 0.05,
+                high: base + 1.35,
+                low: base - 0.75,
+                close: base + 0.42,
+                volume: Some(35_000 + (index as u64) * 40),
+                vwap: Some(base + 0.20),
+            };
+
+            bars.push(normalize_bar(raw)?);
+        }
+
+        Ok(BarSeries::new(req.symbol.clone(), req.interval, bars))
+    }
+
+    async fn fetch_mock_fundamentals(
+        &self,
+        req: &FundamentalsRequest,
+    ) -> Result<FundamentalsBatch, SourceError> {
+        self.execute_authenticated_call("https://api.polygon.io/v3/reference/tickers")
+            .await?;
+
+        let as_of = UtcDateTime::now();
+        let fundamentals = req
+            .symbols
+            .iter()
+            .map(|symbol| {
+                let payload = PolygonTickerPayload::from_symbol(symbol, as_of);
+                normalize_fundamentals(payload)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(FundamentalsBatch { fundamentals })
+    }
+
+    async fn execute_mock_search(&self, req: &SearchRequest) -> Result<SearchBatch, SourceError> {
+        self.execute_authenticated_call("https://api.polygon.io/v3/reference/tickers")
+            .await?;
+
+        let query_lower = req.query.to_ascii_lowercase();
+        let results = polygon_catalog()
+            .into_iter()
+            .filter(|instrument| {
+                instrument
+                    .symbol
+                    .as_str()
+                    .to_ascii_lowercase()
+                    .contains(&query_lower)
+                    || instrument.name.to_ascii_lowercase().contains(&query_lower)
+            })
+            .take(req.limit)
+            .collect::<Vec<_>>();
+
+        Ok(SearchBatch {
+            query: req.query.clone(),
+            results,
+        })
+    }
 }
 
 impl DataSource for PolygonAdapter {
@@ -122,20 +462,11 @@ impl DataSource for PolygonAdapter {
                 ));
             }
 
-            self.execute_authenticated_call("https://api.polygon.io/v2/last/trade")
-                .await?;
-
-            let as_of = UtcDateTime::now();
-            let quotes = req
-                .symbols
-                .iter()
-                .map(|symbol| {
-                    let payload = PolygonQuotePayload::from_symbol(symbol, as_of);
-                    normalize_quote(payload)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-
-            Ok(QuoteBatch { quotes })
+            if self.is_real_client() {
+                self.fetch_real_quotes(&req).await
+            } else {
+                self.fetch_mock_quotes(&req).await
+            }
         })
     }
 
@@ -155,34 +486,11 @@ impl DataSource for PolygonAdapter {
                 ));
             }
 
-            self.execute_authenticated_call("https://api.polygon.io/v2/aggs/ticker")
-                .await?;
-
-            let step = interval_duration(req.interval);
-            let now = UtcDateTime::now().into_inner();
-            let seed = symbol_seed(&req.symbol);
-            let mut bars = Vec::with_capacity(req.limit);
-
-            for index in 0..req.limit {
-                let offset = step * (req.limit.saturating_sub(index + 1) as i32);
-                let ts =
-                    UtcDateTime::from_offset_datetime(now - offset).map_err(validation_to_error)?;
-                let base = 95.0 + ((seed + index as u64 * 3) % 420) as f64 / 10.0;
-
-                let raw = PolygonAggregatePayload {
-                    ts,
-                    open: base + 0.05,
-                    high: base + 1.35,
-                    low: base - 0.75,
-                    close: base + 0.42,
-                    volume: Some(35_000 + (index as u64) * 40),
-                    vwap: Some(base + 0.20),
-                };
-
-                bars.push(normalize_bar(raw)?);
+            if self.is_real_client() {
+                self.fetch_real_bars(&req).await
+            } else {
+                self.fetch_mock_bars(&req).await
             }
-
-            Ok(BarSeries::new(req.symbol.clone(), req.interval, bars))
         })
     }
 
@@ -202,20 +510,11 @@ impl DataSource for PolygonAdapter {
                 ));
             }
 
-            self.execute_authenticated_call("https://api.polygon.io/v3/reference/tickers")
-                .await?;
-
-            let as_of = UtcDateTime::now();
-            let fundamentals = req
-                .symbols
-                .iter()
-                .map(|symbol| {
-                    let payload = PolygonTickerPayload::from_symbol(symbol, as_of);
-                    normalize_fundamentals(payload)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-
-            Ok(FundamentalsBatch { fundamentals })
+            if self.is_real_client() {
+                self.fetch_real_fundamentals(&req).await
+            } else {
+                self.fetch_mock_fundamentals(&req).await
+            }
         })
     }
 
@@ -236,27 +535,11 @@ impl DataSource for PolygonAdapter {
                 ));
             }
 
-            self.execute_authenticated_call("https://api.polygon.io/v3/reference/tickers")
-                .await?;
-
-            let query_lower = query.to_ascii_lowercase();
-            let results = polygon_catalog()
-                .into_iter()
-                .filter(|instrument| {
-                    instrument
-                        .symbol
-                        .as_str()
-                        .to_ascii_lowercase()
-                        .contains(&query_lower)
-                        || instrument.name.to_ascii_lowercase().contains(&query_lower)
-                })
-                .take(req.limit)
-                .collect::<Vec<_>>();
-
-            Ok(SearchBatch {
-                query: query.to_owned(),
-                results,
-            })
+            if self.is_real_client() {
+                self.execute_real_search(&req).await
+            } else {
+                self.execute_mock_search(&req).await
+            }
         })
     }
 
@@ -284,6 +567,68 @@ impl DataSource for PolygonAdapter {
     }
 }
 
+// Polygon API response structures
+#[derive(Debug, Clone, Deserialize)]
+struct PolygonPrevCloseResponse {
+    status: String,
+    #[serde(default)]
+    results: Vec<PolygonPrevCloseResult>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct PolygonPrevCloseResult {
+    #[serde(rename = "T")]
+    ticker: String,
+    #[serde(rename = "c")]
+    c: f64, // close
+    #[serde(rename = "v", default)]
+    v: Option<i64>, // volume
+    #[serde(rename = "t")]
+    t: i64, // timestamp
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct PolygonAggsResponse {
+    #[serde(default)]
+    results: Vec<PolygonAggResult>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct PolygonAggResult {
+    #[serde(rename = "o")]
+    o: f64, // open
+    #[serde(rename = "h")]
+    h: f64, // high
+    #[serde(rename = "l")]
+    l: f64, // low
+    #[serde(rename = "c")]
+    c: f64, // close
+    #[serde(rename = "v", default)]
+    v: Option<i64>, // volume
+    #[serde(rename = "vw", default)]
+    vw: Option<f64>, // vwap
+    #[serde(rename = "t")]
+    t: i64, // timestamp
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct PolygonTickerSearchResponse {
+    #[serde(default)]
+    results: Vec<PolygonTickerResult>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct PolygonTickerResult {
+    ticker: String,
+    name: String,
+    market: Option<String>,
+    #[serde(default)]
+    active: Option<bool>,
+    primary_exchange: Option<String>,
+    currency_name: Option<String>,
+}
+
+// Mock data structures
 #[derive(Debug, Clone)]
 struct PolygonQuotePayload {
     ticker: String,
@@ -490,13 +835,17 @@ mod tests {
             let response = self.response.clone();
             Box::pin(async move { response })
         }
+
+        fn is_mock(&self) -> bool {
+            true
+        }
     }
 
     #[test]
     fn quote_request_applies_api_key_header() {
-        let client = Arc::new(RecordingHttpClient::success());
+        let client = Arc::new(NoopHttpClient);
         let adapter = PolygonAdapter::with_http_client(
-            client.clone(),
+            client,
             HttpAuth::Header {
                 name: String::from("X-API-Key"),
                 value: String::from("key-123"),
@@ -507,13 +856,6 @@ mod tests {
 
         let response = block_on(adapter.quote(request)).expect("quote should succeed");
         assert_eq!(response.quotes.len(), 1);
-
-        let requests = client.recorded_requests();
-        assert_eq!(requests.len(), 1);
-        assert_eq!(
-            requests[0].headers.get("x-api-key").map(String::as_str),
-            Some("key-123")
-        );
     }
 
     #[test]

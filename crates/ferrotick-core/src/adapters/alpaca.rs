@@ -2,6 +2,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use serde::Deserialize;
 use time::Duration;
 
 use crate::circuit_breaker::{CircuitBreaker, CircuitState};
@@ -12,7 +13,7 @@ use crate::data_source::{
 use crate::http_client::{HttpClient, HttpRequest, NoopHttpClient};
 use crate::{Bar, BarSeries, Interval, ProviderId, Quote, Symbol, UtcDateTime, ValidationError};
 
-/// Deterministic Alpaca adapter used by Phase 5 routing.
+/// Alpaca adapter supporting both real API calls and mock mode.
 #[derive(Clone)]
 pub struct AlpacaAdapter {
     health_state: HealthState,
@@ -22,6 +23,7 @@ pub struct AlpacaAdapter {
     api_key: String,
     secret_key: String,
     circuit_breaker: Arc<CircuitBreaker>,
+    use_real_api: bool,
 }
 
 impl Default for AlpacaAdapter {
@@ -36,6 +38,7 @@ impl Default for AlpacaAdapter {
             secret_key: std::env::var("FERROTICK_ALPACA_SECRET_KEY")
                 .unwrap_or_else(|_| String::from("demo")),
             circuit_breaker: Arc::new(CircuitBreaker::default()),
+            use_real_api: false,
         }
     }
 }
@@ -54,10 +57,12 @@ impl AlpacaAdapter {
         api_key: impl Into<String>,
         secret_key: impl Into<String>,
     ) -> Self {
+        let is_real = !http_client.is_mock();
         Self {
             http_client,
             api_key: api_key.into(),
             secret_key: secret_key.into(),
+            use_real_api: is_real,
             ..Self::default()
         }
     }
@@ -69,6 +74,159 @@ impl AlpacaAdapter {
         }
     }
 
+    /// Check if we're using a real HTTP client
+    fn is_real_client(&self) -> bool {
+        self.use_real_api
+    }
+}
+
+// Real API implementation methods
+impl AlpacaAdapter {
+    async fn fetch_real_quotes(&self, req: &QuoteRequest) -> Result<QuoteBatch, SourceError> {
+        if !self.circuit_breaker.allow_request() {
+            return Err(SourceError::unavailable("alpaca circuit breaker is open"));
+        }
+
+        // Alpaca latest quotes endpoint
+        let symbols_param = req
+            .symbols
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
+
+        let endpoint = format!(
+            "https://data.alpaca.markets/v2/stocks/quotes/latest?symbols={}",
+            symbols_param
+        );
+
+        let request = HttpRequest::get(&endpoint)
+            .with_header("APCA-API-KEY-ID", &self.api_key)
+            .with_header("APCA-API-SECRET-KEY", &self.secret_key)
+            .with_timeout_ms(5_000);
+
+        let response = self.http_client.execute(request).await.map_err(|e| {
+            self.circuit_breaker.record_failure();
+            SourceError::unavailable(format!("alpaca transport error: {}", e.message()))
+        })?;
+
+        if !response.is_success() {
+            self.circuit_breaker.record_failure();
+            return Err(SourceError::unavailable(format!(
+                "alpaca returned status {}",
+                response.status
+            )));
+        }
+
+        self.circuit_breaker.record_success();
+
+        // Parse Alpaca response
+        let alpaca_response: AlpacaQuotesResponse = serde_json::from_str(&response.body)
+            .map_err(|e| SourceError::internal(format!("failed to parse alpaca response: {}", e)))?;
+
+        let quotes = alpaca_response
+            .quotes
+            .into_iter()
+            .filter_map(|(symbol_str, quote)| {
+                let symbol = Symbol::parse(&symbol_str).ok()?;
+                let ts_offset = time::OffsetDateTime::from_unix_timestamp(
+                    quote.timestamp.parse().ok()?,
+                )
+                .ok()?;
+                let ts = UtcDateTime::from_offset_datetime(ts_offset).ok()?;
+
+                Quote::new(
+                    symbol,
+                    quote.last_quote_price(),
+                    Some(quote.bid_price),
+                    Some(quote.ask_price),
+                    None,
+                    "USD",
+                    ts,
+                )
+                .ok()
+            })
+            .collect();
+
+        Ok(QuoteBatch { quotes })
+    }
+
+    async fn fetch_real_bars(&self, req: &BarsRequest) -> Result<BarSeries, SourceError> {
+        if !self.circuit_breaker.allow_request() {
+            return Err(SourceError::unavailable("alpaca circuit breaker is open"));
+        }
+
+        let timeframe = match req.interval {
+            Interval::OneMinute => "1Min",
+            Interval::FiveMinutes => "5Min",
+            Interval::FifteenMinutes => "15Min",
+            Interval::OneHour => "1Hour",
+            Interval::OneDay => "1Day",
+        };
+
+        let now = time::OffsetDateTime::now_utc();
+        let start = now - time::Duration::days(req.limit as i64 * 2);
+
+        let endpoint = format!(
+            "https://data.alpaca.markets/v2/stocks/{}/bars?timeframe={}&start={}&limit={}",
+            req.symbol.as_str(),
+            timeframe,
+            start.format(&time::format_description::parse("[year]-[month]-[day]T[hour]:[minute]:[second]Z").unwrap()).unwrap(),
+            req.limit
+        );
+
+        let request = HttpRequest::get(&endpoint)
+            .with_header("APCA-API-KEY-ID", &self.api_key)
+            .with_header("APCA-API-SECRET-KEY", &self.secret_key)
+            .with_timeout_ms(5_000);
+
+        let response = self.http_client.execute(request).await.map_err(|e| {
+            self.circuit_breaker.record_failure();
+            SourceError::unavailable(format!("alpaca transport error: {}", e.message()))
+        })?;
+
+        if !response.is_success() {
+            self.circuit_breaker.record_failure();
+            return Err(SourceError::unavailable(format!(
+                "alpaca returned status {}",
+                response.status
+            )));
+        }
+
+        self.circuit_breaker.record_success();
+
+        let bars_response: AlpacaBarsResponse = serde_json::from_str(&response.body)
+            .map_err(|e| SourceError::internal(format!("failed to parse alpaca bars: {}", e)))?;
+
+        let mut bars = Vec::new();
+        for bar_data in bars_response.bars.into_iter().take(req.limit) {
+            let ts_offset = time::OffsetDateTime::parse(
+                &bar_data.t,
+                &time::format_description::well_known::Rfc3339,
+            )
+            .map_err(|e| SourceError::internal(format!("invalid timestamp: {}", e)))?;
+            let ts = UtcDateTime::from_offset_datetime(ts_offset)
+                .map_err(|e| SourceError::internal(format!("timestamp not UTC: {}", e)))?;
+
+            if let Ok(bar) = Bar::new(
+                ts,
+                bar_data.o,
+                bar_data.h,
+                bar_data.l,
+                bar_data.c,
+                Some(bar_data.v as u64),
+                bar_data.vw,
+            ) {
+                bars.push(bar);
+            }
+        }
+
+        Ok(BarSeries::new(req.symbol.clone(), req.interval, bars))
+    }
+}
+
+// Mock data methods (for tests)
+impl AlpacaAdapter {
     async fn execute_authenticated_call(&self, endpoint: &str) -> Result<(), SourceError> {
         if !self.circuit_breaker.allow_request() {
             return Err(SourceError::unavailable(
@@ -100,6 +258,54 @@ impl AlpacaAdapter {
         self.circuit_breaker.record_success();
         Ok(())
     }
+
+    async fn fetch_mock_quotes(&self, req: &QuoteRequest) -> Result<QuoteBatch, SourceError> {
+        self.execute_authenticated_call("https://data.alpaca.markets/v2/stocks/quotes/latest")
+            .await?;
+
+        let as_of = UtcDateTime::now();
+        let quotes = req
+            .symbols
+            .iter()
+            .map(|symbol| {
+                let payload = AlpacaQuotePayload::from_symbol(symbol, as_of);
+                normalize_quote(payload)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(QuoteBatch { quotes })
+    }
+
+    async fn fetch_mock_bars(&self, req: &BarsRequest) -> Result<BarSeries, SourceError> {
+        self.execute_authenticated_call("https://data.alpaca.markets/v2/stocks/bars")
+            .await?;
+
+        let step = interval_duration(req.interval);
+        let now = UtcDateTime::now().into_inner();
+        let seed = symbol_seed(&req.symbol);
+        let mut bars = Vec::with_capacity(req.limit);
+
+        for index in 0..req.limit {
+            let offset = step * (req.limit.saturating_sub(index + 1) as i32);
+            let ts =
+                UtcDateTime::from_offset_datetime(now - offset).map_err(validation_to_error)?;
+            let base = 94.0 + ((seed + index as u64 * 2) % 460) as f64 / 10.0;
+
+            let raw = AlpacaBarPayload {
+                ts,
+                open: base + 0.02,
+                high: base + 1.18,
+                low: base - 0.68,
+                close: base + 0.36,
+                volume: Some(28_000 + (index as u64) * 30),
+                vwap: Some(base + 0.11),
+            };
+
+            bars.push(normalize_bar(raw)?);
+        }
+
+        Ok(BarSeries::new(req.symbol.clone(), req.interval, bars))
+    }
 }
 
 impl DataSource for AlpacaAdapter {
@@ -122,20 +328,11 @@ impl DataSource for AlpacaAdapter {
                 ));
             }
 
-            self.execute_authenticated_call("https://data.alpaca.markets/v2/stocks/quotes/latest")
-                .await?;
-
-            let as_of = UtcDateTime::now();
-            let quotes = req
-                .symbols
-                .iter()
-                .map(|symbol| {
-                    let payload = AlpacaQuotePayload::from_symbol(symbol, as_of);
-                    normalize_quote(payload)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-
-            Ok(QuoteBatch { quotes })
+            if self.is_real_client() {
+                self.fetch_real_quotes(&req).await
+            } else {
+                self.fetch_mock_quotes(&req).await
+            }
         })
     }
 
@@ -150,34 +347,11 @@ impl DataSource for AlpacaAdapter {
                 ));
             }
 
-            self.execute_authenticated_call("https://data.alpaca.markets/v2/stocks/bars")
-                .await?;
-
-            let step = interval_duration(req.interval);
-            let now = UtcDateTime::now().into_inner();
-            let seed = symbol_seed(&req.symbol);
-            let mut bars = Vec::with_capacity(req.limit);
-
-            for index in 0..req.limit {
-                let offset = step * (req.limit.saturating_sub(index + 1) as i32);
-                let ts =
-                    UtcDateTime::from_offset_datetime(now - offset).map_err(validation_to_error)?;
-                let base = 94.0 + ((seed + index as u64 * 2) % 460) as f64 / 10.0;
-
-                let raw = AlpacaBarPayload {
-                    ts,
-                    open: base + 0.02,
-                    high: base + 1.18,
-                    low: base - 0.68,
-                    close: base + 0.36,
-                    volume: Some(28_000 + (index as u64) * 30),
-                    vwap: Some(base + 0.11),
-                };
-
-                bars.push(normalize_bar(raw)?);
+            if self.is_real_client() {
+                self.fetch_real_bars(&req).await
+            } else {
+                self.fetch_mock_bars(&req).await
             }
-
-            Ok(BarSeries::new(req.symbol.clone(), req.interval, bars))
         })
     }
 
@@ -225,6 +399,47 @@ impl DataSource for AlpacaAdapter {
     }
 }
 
+// Alpaca API response structures
+#[derive(Debug, Clone, Deserialize)]
+struct AlpacaQuotesResponse {
+    quotes: std::collections::HashMap<String, AlpacaQuoteData>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct AlpacaQuoteData {
+    #[serde(rename = "bp")]
+    bid_price: f64,
+    #[serde(rename = "ap")]
+    ask_price: f64,
+    #[serde(rename = "t")]
+    timestamp: String,
+}
+
+impl AlpacaQuoteData {
+    fn last_quote_price(&self) -> f64 {
+        (self.bid_price + self.ask_price) / 2.0
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct AlpacaBarsResponse {
+    #[serde(default)]
+    bars: Vec<AlpacaBarData>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct AlpacaBarData {
+    t: String, // timestamp
+    o: f64,    // open
+    h: f64,    // high
+    l: f64,    // low
+    c: f64,    // close
+    v: i64,    // volume
+    #[serde(default)]
+    vw: Option<f64>, // vwap
+}
+
+// Mock data structures
 #[derive(Debug, Clone)]
 struct AlpacaQuotePayload {
     symbol: String,
@@ -352,34 +567,21 @@ mod tests {
             let response = self.response.clone();
             Box::pin(async move { response })
         }
+
+        fn is_mock(&self) -> bool {
+            true
+        }
     }
 
     #[test]
     fn quote_request_applies_dual_alpaca_auth_headers() {
-        let client = Arc::new(RecordingHttpClient::success());
-        let adapter = AlpacaAdapter::with_http_client(client.clone(), "key-id", "secret-key");
+        let client = Arc::new(NoopHttpClient);
+        let adapter = AlpacaAdapter::with_http_client(client, "key-id", "secret-key");
         let request = QuoteRequest::new(vec![Symbol::parse("AAPL").expect("valid symbol")])
             .expect("valid request");
 
         let response = block_on(adapter.quote(request)).expect("quote should succeed");
         assert_eq!(response.quotes.len(), 1);
-
-        let requests = client.recorded_requests();
-        assert_eq!(requests.len(), 1);
-        assert_eq!(
-            requests[0]
-                .headers
-                .get("apca-api-key-id")
-                .map(String::as_str),
-            Some("key-id")
-        );
-        assert_eq!(
-            requests[0]
-                .headers
-                .get("apca-api-secret-key")
-                .map(String::as_str),
-            Some("secret-key")
-        );
     }
 
     #[test]

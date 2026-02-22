@@ -37,3 +37,9 @@ impl CliError {
         }
     }
 }
+
+impl From<ferrotick_core::SourceError> for CliError {
+    fn from(error: ferrotick_core::SourceError) -> Self {
+        CliError::Command(error.message().to_string())
+    }
+}

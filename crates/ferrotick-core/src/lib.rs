@@ -113,6 +113,7 @@
 //! - Input validation on all domain types
 
 pub mod adapters;
+pub mod cache;
 pub mod circuit_breaker;
 pub mod data_source;
 pub mod domain;
@@ -120,6 +121,7 @@ pub mod envelope;
 pub mod error;
 pub mod http_client;
 pub mod provider_policy;
+pub mod retry;
 pub mod routing;
 pub mod source;
 pub mod throttling;
@@ -131,6 +133,9 @@ pub use adapters::{AlpacaAdapter, AlphaVantageAdapter, PolygonAdapter, YahooAdap
 
 // Circuit breaker
 pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitState};
+
+// Caching
+pub use cache::{CacheMode, CacheStore};
 
 // Data source trait and types
 pub use data_source::{
@@ -166,9 +171,13 @@ pub use http_client::{
 // Provider policies
 pub use provider_policy::{BackoffPolicy, ProviderPolicy};
 
+// Retry logic
+pub use retry::{Backoff, RetryConfig};
+
 // Routing types
 pub use routing::{
-    RouteFailure, RouteResult, RouteSuccess, SourceRouter, SourceSnapshot, SourceStrategy,
+    RouteFailure, RouteResult, RouteSuccess, SourceRouter, SourceRouterBuilder, SourceSnapshot,
+    SourceStrategy,
 };
 
 // Source identifiers

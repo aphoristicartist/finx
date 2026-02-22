@@ -66,6 +66,7 @@ to multiple market data providers. Features include:\n\
   • Secure parameterized SQL queries\n\
   • AI-agent streaming mode\n\
   • Structured JSON output with metadata\n\
+  • Real API calls with fallback to mock mode\n\
 \n\
 Use 'ferrotick <command> --help' for command-specific help."
 )]
@@ -99,6 +100,14 @@ pub struct Cli {
     /// Enable profiling metadata in output (placeholder).
     #[arg(long, global = true, default_value_t = false)]
     pub profile: bool,
+
+    /// Use mock mode with deterministic fake data instead of real API calls.
+    ///
+    /// This is useful for testing without making real API calls or when
+    /// API keys are not available. When enabled, all providers return
+    /// deterministic mock data.
+    #[arg(long, global = true, default_value_t = false)]
+    pub mock: bool,
 
     /// Enable NDJSON streaming mode for AI agents.
     ///
@@ -213,6 +222,14 @@ pub enum Command {
     ///   ferrotick sql "SELECT COUNT(*) FROM bars_1d"
     Sql(SqlArgs),
 
+    /// 📤 Export data from warehouse to Parquet or CSV.
+    ///
+    /// # Examples
+    ///
+    ///   ferrotick export --output data.csv --format csv --table bars --symbol AAPL
+    ///   ferrotick export --output data.parquet --format parquet --query "SELECT * FROM bars_1d"
+    Export(ExportArgs),
+
     /// 📦 Cache management commands.
     Cache(CacheArgs),
 
@@ -300,9 +317,72 @@ pub struct CacheArgs {
     pub command: CacheCommand,
 }
 
+/// Arguments for `cache load` command.
+#[derive(Debug, Args)]
+pub struct CacheLoadArgs {
+    /// Stock symbol to load (e.g., AAPL).
+    pub symbol: String,
+
+    /// Number of days of historical data to fetch.
+    #[arg(long, default_value = "30")]
+    pub days: Option<String>,
+
+    /// Bar interval (1m, 5m, 15m, 1h, 1d).
+    #[arg(long, default_value = "1d")]
+    pub interval: String,
+}
+
+/// Arguments for `export` command.
+#[derive(Debug, Args)]
+pub struct ExportArgs {
+    /// SQL query to execute for export.
+    ///
+    /// If not provided, --table and --symbol will be used to generate a default query.
+    #[arg(long)]
+    pub query: Option<String>,
+
+    /// Table to export (bars, quotes, fundamentals).
+    ///
+    /// Used when --query is not provided.
+    #[arg(long)]
+    pub table: Option<String>,
+
+    /// Symbol to filter (optional).
+    ///
+    /// Used with --table to filter by symbol.
+    #[arg(long)]
+    pub symbol: Option<String>,
+
+    /// Output format (parquet, csv).
+    ///
+    /// - parquet: Columnar format optimized for analytics
+    /// - csv: Human-readable spreadsheet format
+    #[arg(long, default_value = "parquet")]
+    pub export_format: String,
+
+    /// Output file path.
+    #[arg(long)]
+    pub output: String,
+
+    /// Maximum number of rows to export.
+    #[arg(long, default_value = "100000")]
+    pub max_rows: Option<String>,
+
+    /// Query timeout in milliseconds.
+    #[arg(long, default_value = "30000")]
+    pub query_timeout_ms: Option<String>,
+}
+
 /// Cache management subcommands.
 #[derive(Debug, Subcommand)]
 pub enum CacheCommand {
+    /// Load historical data from providers into warehouse cache.
+    ///
+    /// Fetches OHLCV bars for a given symbol and interval,
+    /// storing them in both the DuckDB warehouse and as Parquet files
+    /// for analytics and ML workflows.
+    Load(CacheLoadArgs),
+
     /// Sync local Parquet cache partitions into warehouse metadata.
     ///
     /// Scans the cache directory for parquet files and registers them

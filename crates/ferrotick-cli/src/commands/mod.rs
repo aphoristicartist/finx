@@ -1,5 +1,7 @@
 mod bars;
 mod cache;
+mod cache_load;
+mod export;
 mod fundamentals;
 mod quote;
 mod schema;
@@ -8,10 +10,10 @@ mod sources;
 mod sql;
 mod warehouse_sync;
 
-use ferrotick_core::{Endpoint, Envelope, ProviderId, SourceRouter, SourceStrategy};
+use ferrotick_core::{Endpoint, Envelope, ProviderId, SourceRouter, SourceRouterBuilder, SourceStrategy};
 use serde_json::Value;
 
-use crate::cli::{Cli, Command, SourceSelector};
+use crate::cli::{CacheCommand, Cli, Command, ExportArgs, SourceSelector};
 use crate::error::CliError;
 use crate::metadata::Metadata;
 
@@ -63,7 +65,15 @@ impl CommandResult {
 }
 
 pub async fn run(cli: &Cli) -> Result<Envelope<Value>, CliError> {
-    let router = SourceRouter::default();
+    let router = if cli.mock {
+        SourceRouterBuilder::new()
+            .with_mock_mode()
+            .build()
+    } else {
+        SourceRouterBuilder::new()
+            .with_real_clients()
+            .build()
+    };
     let strategy = to_source_strategy(cli.source);
 
     let command_result = match &cli.command {
@@ -76,8 +86,18 @@ pub async fn run(cli: &Cli) -> Result<Envelope<Value>, CliError> {
             cli.explain,
             non_provider_source_chain(&router, &strategy).await,
         )?,
+        Command::Export(args) => {
+            export::run(args)?
+        }
         Command::Cache(args) => {
-            cache::run(args, non_provider_source_chain(&router, &strategy).await)?
+            match &args.command {
+                CacheCommand::Load(load_args) => {
+                    cache_load::run(load_args, &router, strategy.clone()).await?
+                }
+                CacheCommand::Sync => {
+                    cache::run(args, non_provider_source_chain(&router, &strategy).await)?
+                }
+            }
         }
         Command::Schema(args) => {
             schema::run(args, non_provider_source_chain(&router, &strategy).await)?

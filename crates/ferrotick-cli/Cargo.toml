@@ -11,6 +11,7 @@ name = "ferrotick"
 path = "src/main.rs"
 
 [dependencies]
+arrow = "54"
 clap.workspace = true
 duckdb.workspace = true
 ferrotick-agent = { path = "../ferrotick-agent" }
@@ -19,6 +20,8 @@ ferrotick-warehouse = { path = "../ferrotick-warehouse" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+time.workspace = true
+tokio.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]

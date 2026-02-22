@@ -21,6 +21,13 @@ pub fn run(args: &CacheArgs, source_chain: Vec<ProviderId>) -> Result<CommandRes
             }
             Ok(result)
         }
+        CacheCommand::Load(_) => {
+            // This is handled in cache_load.rs module
+            // This run() function is only for CacheCommand::Sync
+            Err(CliError::Command(
+                "cache load command should be handled by cache_load module".to_string(),
+            ))
+        }
     }
 }
 

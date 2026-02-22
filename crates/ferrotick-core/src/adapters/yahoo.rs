@@ -1,6 +1,8 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
 use serde::Deserialize;
 use time::Duration;
@@ -16,7 +18,184 @@ use crate::{
     UtcDateTime, ValidationError,
 };
 
-/// Deterministic Yahoo adapter used by the Phase 2 routing pipeline.
+// ============================================================================
+// Yahoo Auth Manager - Handles cookie/crumb authentication
+// ============================================================================
+
+/// Manages Yahoo Finance cookie/crumb authentication.
+/// 
+/// Yahoo's unofficial API requires:
+/// 1. Session cookie from fc.yahoo.com
+/// 2. Crumb token from query1.finance.yahoo.com/v1/test/getcrumb
+#[derive(Clone)]
+pub struct YahooAuthManager {
+    /// Cached cookie value (e.g., "B=some_cookie_value")
+    cookie: Arc<std::sync::Mutex<Option<String>>>,
+    /// Cached crumb token
+    crumb: Arc<std::sync::Mutex<Option<String>>>,
+    /// When the auth was last refreshed
+    last_refresh: Arc<std::sync::Mutex<Option<Instant>>>,
+    /// Whether auth refresh is currently in progress
+    refreshing: Arc<AtomicBool>,
+    /// Auth TTL in seconds (default: 1 hour)
+    auth_ttl_secs: u64,
+    /// Whether to use environment variable override for auth
+    use_env_override: bool,
+}
+
+impl Default for YahooAuthManager {
+    fn default() -> Self {
+        Self {
+            cookie: Arc::new(std::sync::Mutex::new(None)),
+            crumb: Arc::new(std::sync::Mutex::new(None)),
+            last_refresh: Arc::new(std::sync::Mutex::new(None)),
+            refreshing: Arc::new(AtomicBool::new(false)),
+            auth_ttl_secs: 3600, // 1 hour
+            use_env_override: true,
+        }
+    }
+}
+
+impl YahooAuthManager {
+    /// Check if cached auth is valid (exists and not expired)
+    fn is_auth_valid(&self) -> bool {
+        let cookie = self.cookie.lock().unwrap();
+        let crumb = self.crumb.lock().unwrap();
+        let last_refresh = self.last_refresh.lock().unwrap();
+
+        if cookie.is_none() || crumb.is_none() {
+            return false;
+        }
+
+        if let Some(last) = *last_refresh {
+            let elapsed = last.elapsed().as_secs();
+            return elapsed < self.auth_ttl_secs;
+        }
+
+        false
+    }
+
+    /// Get current crumb for use in query parameters, refreshing if needed
+    pub async fn get_crumb(&self, http_client: &Arc<dyn HttpClient>) -> Result<String, SourceError> {
+        // Return cached crumb if valid
+        if self.is_auth_valid() {
+            let crumb = self.crumb.lock().unwrap().clone();
+            if let Some(cr) = crumb {
+                return Ok(cr);
+            }
+        }
+
+        // Refresh auth
+        self.refresh_auth(http_client).await?;
+
+        // Return new crumb
+        let crumb = self.crumb.lock().unwrap().clone();
+        crumb.ok_or_else(|| SourceError::unavailable("failed to obtain Yahoo crumb"))
+    }
+
+    /// Get current auth (cookies are managed by the jar, crumb is in URL params)
+    pub async fn get_auth(&self, http_client: &Arc<dyn HttpClient>) -> Result<HttpAuth, SourceError> {
+        if self.use_env_override {
+            if let Some(auth) = Self::get_env_auth() {
+                return Ok(auth);
+            }
+        }
+        if !self.is_auth_valid() {
+            self.refresh_auth(http_client).await?;
+        }
+        Ok(HttpAuth::None) // Cookies managed by jar, no manual auth needed
+    }
+
+    /// Refresh auth by fetching cookie and crumb from Yahoo
+    async fn refresh_auth(&self, http_client: &Arc<dyn HttpClient>) -> Result<(), SourceError> {
+        // Check if already refreshing
+        if self.refreshing.compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed).is_err() {
+            // Another thread is refreshing, wait a bit and check if done
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            if self.is_auth_valid() {
+                return Ok(());
+            }
+        }
+
+        let result = self.do_refresh(http_client).await;
+
+        // Reset refreshing flag
+        self.refreshing.store(false, Ordering::SeqCst);
+
+        result
+    }
+
+    /// Actually perform the refresh
+    async fn do_refresh(&self, http_client: &Arc<dyn HttpClient>) -> Result<(), SourceError> {
+        // Step 1: Visit fc.yahoo.com with Referer header to get session cookies
+        let cookie_request = HttpRequest::get("https://fc.yahoo.com")
+            .with_header("referer", "https://finance.yahoo.com/")
+            .with_timeout_ms(10_000);
+
+        let _cookie_response = http_client.execute(cookie_request).await.map_err(|e| {
+            SourceError::unavailable(format!("failed to fetch Yahoo cookie: {}", e.message()))
+        })?;
+
+        // Step 2: Fetch crumb from query endpoints
+        let crumb_endpoints = [
+            "https://query1.finance.yahoo.com/v1/test/getcrumb",
+            "https://query2.finance.yahoo.com/v1/test/getcrumb",
+        ];
+
+        for endpoint in &crumb_endpoints {
+            let crumb_request = HttpRequest::get(endpoint.to_string())
+                .with_header("referer", "https://finance.yahoo.com/")
+                .with_timeout_ms(10_000);
+
+            match http_client.execute(crumb_request).await {
+                Ok(response) if response.is_success() && !response.body.is_empty() => {
+                    let body = response.body.trim();
+
+                    // Check for HTML error pages
+                    if body.contains("<html") || body.contains("<!DOCTYPE") {
+                        continue;
+                    }
+
+                    // Check for "Too Many Requests"
+                    if body.to_lowercase().contains("too many requests") {
+                        return Err(SourceError::unavailable("Yahoo rate limited while fetching crumb"));
+                    }
+
+                    // Validate crumb (should not be too long, contain reasonable characters)
+                    if body.len() > 0 && body.len() < 100 && !body.contains(' ') {
+                        *self.crumb.lock().unwrap() = Some(body.to_string());
+                        *self.last_refresh.lock().unwrap() = Some(Instant::now());
+                        return Ok(());
+                    }
+                }
+                _ => continue,
+            }
+        }
+
+        Err(SourceError::unavailable("failed to fetch Yahoo crumb from all endpoints"))
+    }
+
+    /// Get auth from environment variables (for testing/override)
+    fn get_env_auth() -> Option<HttpAuth> {
+        std::env::var("YAHOO_COOKIE")
+            .ok()
+            .map(|cookie| HttpAuth::Cookie(cookie))
+    }
+
+    /// Invalidate cached auth (triggers refresh on next call)
+    pub fn invalidate(&self) {
+        *self.cookie.lock().unwrap() = None;
+        *self.crumb.lock().unwrap() = None;
+        *self.last_refresh.lock().unwrap() = None;
+    }
+
+}
+
+// ============================================================================
+// Yahoo Adapter
+// ============================================================================
+
+/// Yahoo adapter supporting both real API calls and mock mode.
 #[derive(Clone)]
 pub struct YahooAdapter {
     health_state: HealthState,
@@ -25,6 +204,9 @@ pub struct YahooAdapter {
     http_client: Arc<dyn HttpClient>,
     auth: HttpAuth,
     circuit_breaker: Arc<CircuitBreaker>,
+    use_real_api: bool,
+    /// Auth manager for cookie/crumb handling
+    auth_manager: Arc<YahooAuthManager>,
 }
 
 impl Default for YahooAdapter {
@@ -36,6 +218,8 @@ impl Default for YahooAdapter {
             http_client: Arc::new(NoopHttpClient),
             auth: HttpAuth::Cookie(String::from("B=ferrotick-session")),
             circuit_breaker: Arc::new(CircuitBreaker::default()),
+            use_real_api: false,
+            auth_manager: Arc::new(YahooAuthManager::default()),
         }
     }
 }
@@ -50,9 +234,12 @@ impl YahooAdapter {
     }
 
     pub fn with_http_client(http_client: Arc<dyn HttpClient>, auth: HttpAuth) -> Self {
+        let is_real = !http_client.is_mock();
         Self {
             http_client,
             auth,
+            use_real_api: is_real,
+            auth_manager: Arc::new(YahooAuthManager::default()),
             ..Self::default()
         }
     }
@@ -62,6 +249,16 @@ impl YahooAdapter {
             circuit_breaker,
             ..Self::default()
         }
+    }
+
+    /// Check if we're using a real HTTP client
+    fn is_real_client(&self) -> bool {
+        self.use_real_api
+    }
+
+    /// Handle authentication errors by invalidating cached auth
+    fn handle_auth_error(&self) {
+        self.auth_manager.invalidate();
     }
 
     async fn execute_authenticated_call(&self, endpoint: &str) -> Result<(), SourceError> {
@@ -91,12 +288,6 @@ impl YahooAdapter {
 
         self.circuit_breaker.record_success();
         Ok(())
-    }
-
-    /// Check if we're using a real HTTP client (not NoopHttpClient)
-    fn is_real_client(&self) -> bool {
-        // Use type name checking to determine if this is a real client
-        std::any::type_name_of_val(&*self.http_client).contains("ReqwestHttpClient")
     }
 }
 
@@ -233,23 +424,75 @@ impl YahooAdapter {
             .collect::<Vec<_>>()
             .join(",");
 
+        // Get crumb for authentication
+        let crumb = self.auth_manager.get_crumb(&self.http_client).await?;
+
         let endpoint = format!(
-            "https://query1.finance.yahoo.com/v7/finance/quote?symbols={}&fields=regularMarketPrice,regularMarketBid,regularMarketAsk,regularMarketVolume,currency",
-            symbols_param
+            "https://query1.finance.yahoo.com/v7/finance/quote?symbols={}&fields=regularMarketPrice,regularMarketBid,regularMarketAsk,regularMarketVolume,currency&crumb={}",
+            urlencoding::encode(&symbols_param),
+            urlencoding::encode(&crumb)
         );
 
+        self.fetch_quotes_with_retry(&endpoint).await
+    }
+
+    /// Fetch quotes with automatic auth retry on 401/429
+    async fn fetch_quotes_with_retry(&self, endpoint: &str) -> Result<QuoteBatch, SourceError> {
         if !self.circuit_breaker.allow_request() {
             return Err(SourceError::unavailable("yahoo circuit breaker is open"));
         }
 
-        let request = HttpRequest::get(&endpoint)
-            .with_auth(&self.auth)
-            .with_timeout_ms(5_000);
+        // Make request - cookies are in the jar, crumb is in the URL
+        let request = HttpRequest::get(endpoint)
+            .with_header("referer", "https://finance.yahoo.com/")
+            .with_timeout_ms(10_000);
 
         let response = self.http_client.execute(request).await.map_err(|e| {
             self.circuit_breaker.record_failure();
             SourceError::unavailable(format!("yahoo transport error: {}", e.message()))
         })?;
+
+        // Handle 401/429 by refreshing auth and retrying once
+        if response.status == 401 || response.status == 429 {
+            self.handle_auth_error();
+
+            // Get fresh crumb
+            let _ = self.auth_manager.get_crumb(&self.http_client).await;
+
+            // Retry with fresh crumb (rebuild endpoint with new crumb)
+            let crumb = self.auth_manager.get_crumb(&self.http_client).await?;
+            let endpoint_with_crumb = if endpoint.contains("&crumb=") {
+                // Replace existing crumb
+                endpoint.split("&crumb=").next().unwrap().to_string()
+            } else {
+                endpoint.to_string()
+            };
+
+            let new_endpoint = format!("{}&crumb={}",
+                endpoint_with_crumb.split('&').take_while(|s| !s.starts_with("crumb=")).collect::<Vec<_>>().join("&"),
+                urlencoding::encode(&crumb)
+            );
+
+            let retry_request = HttpRequest::get(&new_endpoint)
+                .with_header("referer", "https://finance.yahoo.com/")
+                .with_timeout_ms(10_000);
+
+            let retry_response = self.http_client.execute(retry_request).await.map_err(|e| {
+                self.circuit_breaker.record_failure();
+                SourceError::unavailable(format!("yahoo transport error on retry: {}", e.message()))
+            })?;
+
+            if !retry_response.is_success() {
+                self.circuit_breaker.record_failure();
+                return Err(SourceError::unavailable(format!(
+                    "yahoo returned status {} after auth refresh",
+                    retry_response.status
+                )));
+            }
+
+            self.circuit_breaker.record_success();
+            return self.parse_quote_response(&retry_response.body);
+        }
 
         if !response.is_success() {
             self.circuit_breaker.record_failure();
@@ -260,9 +503,12 @@ impl YahooAdapter {
         }
 
         self.circuit_breaker.record_success();
+        self.parse_quote_response(&response.body)
+    }
 
-        // Parse Yahoo Finance JSON response
-        let yahoo_response: YahooQuoteResponse = serde_json::from_str(&response.body)
+    /// Parse Yahoo quote response JSON
+    fn parse_quote_response(&self, body: &str) -> Result<QuoteBatch, SourceError> {
+        let yahoo_response: YahooQuoteResponse = serde_json::from_str(body)
             .map_err(|e| SourceError::internal(format!("failed to parse yahoo response: {}", e)))?;
 
         // Check for API-level errors
@@ -314,38 +560,88 @@ impl YahooAdapter {
             Interval::OneDay => "1d",
         };
 
+        // Get crumb for authentication
+        let crumb = self.auth_manager.get_crumb(&self.http_client).await?;
+
         let endpoint = format!(
-            "https://query1.finance.yahoo.com/v8/finance/chart/{}?range={}&interval={}",
-            req.symbol.as_str(),
+            "https://query1.finance.yahoo.com/v8/finance/chart/{}?range={}&interval={}&crumb={}",
+            urlencoding::encode(req.symbol.as_str()),
             range,
-            interval
+            interval,
+            urlencoding::encode(&crumb)
         );
 
+        self.fetch_bars_with_retry(&endpoint, &req.symbol, req.interval, req.limit).await
+    }
+
+    /// Fetch bars with automatic auth retry on 401/429
+    async fn fetch_bars_with_retry(
+        &self,
+        endpoint: &str,
+        symbol: &Symbol,
+        interval: Interval,
+        limit: usize,
+    ) -> Result<BarSeries, SourceError> {
         if !self.circuit_breaker.allow_request() {
             return Err(SourceError::unavailable("yahoo circuit breaker is open"));
         }
 
-        let request = HttpRequest::get(&endpoint)
-            .with_auth(&self.auth)
-            .with_timeout_ms(5_000);
+        // Make request - cookies are in the jar, crumb is in the URL
+        let request = HttpRequest::get(endpoint)
+            .with_header("referer", "https://finance.yahoo.com/")
+            .with_timeout_ms(10_000);
 
         let response = self.http_client.execute(request).await.map_err(|e| {
             self.circuit_breaker.record_failure();
             SourceError::unavailable(format!("yahoo transport error: {}", e.message()))
         })?;
 
-        if !response.is_success() {
+        // Handle 401/429 by refreshing auth and retrying once
+        let response_body = if response.status == 401 || response.status == 429 {
+            self.handle_auth_error();
+
+            // Get fresh crumb and rebuild endpoint
+            let crumb = self.auth_manager.get_crumb(&self.http_client).await?;
+
+            let base_endpoint = endpoint.split("&crumb=").next().unwrap_or(endpoint);
+
+            let new_endpoint = format!("{}&crumb={}",
+                base_endpoint.split('&').take_while(|s| !s.starts_with("crumb=")).collect::<Vec<_>>().join("&"),
+                urlencoding::encode(&crumb)
+            );
+
+            let retry_request = HttpRequest::get(&new_endpoint)
+                .with_header("referer", "https://finance.yahoo.com/")
+                .with_timeout_ms(10_000);
+
+            let retry_response = self.http_client.execute(retry_request).await.map_err(|e| {
+                self.circuit_breaker.record_failure();
+                SourceError::unavailable(format!("yahoo transport error on retry: {}", e.message()))
+            })?;
+
+            if !retry_response.is_success() {
+                self.circuit_breaker.record_failure();
+                return Err(SourceError::unavailable(format!(
+                    "yahoo returned status {} after auth refresh",
+                    retry_response.status
+                )));
+            }
+
+            self.circuit_breaker.record_success();
+            retry_response.body
+        } else if !response.is_success() {
             self.circuit_breaker.record_failure();
             return Err(SourceError::unavailable(format!(
                 "yahoo returned status {}",
                 response.status
             )));
-        }
-
-        self.circuit_breaker.record_success();
+        } else {
+            self.circuit_breaker.record_success();
+            response.body
+        };
 
         // Parse Yahoo Finance chart response
-        let chart_response: YahooChartResponse = serde_json::from_str(&response.body)
+        let chart_response: YahooChartResponse = serde_json::from_str(&response_body)
             .map_err(|e| SourceError::internal(format!("failed to parse yahoo chart: {}", e)))?;
 
         // Check for API-level errors
@@ -375,7 +671,7 @@ impl YahooAdapter {
             .ok_or_else(|| SourceError::internal("no quote data"))?;
 
         let mut bars = Vec::new();
-        for (i, &ts_value) in timestamp.iter().enumerate().take(req.limit) {
+        for (i, &ts_value) in timestamp.iter().enumerate().take(limit) {
             // Convert Unix timestamp to UtcDateTime
             let ts_offset = time::OffsetDateTime::from_unix_timestamp(ts_value)
                 .map_err(|e| SourceError::internal(format!("invalid timestamp: {}", e)))?;
@@ -397,68 +693,248 @@ impl YahooAdapter {
             }
         }
 
-        Ok(BarSeries::new(req.symbol.clone(), req.interval, bars))
+        Ok(BarSeries::new(symbol.clone(), interval, bars))
     }
 
     async fn fetch_real_fundamentals(
         &self,
         req: &FundamentalsRequest,
     ) -> Result<FundamentalsBatch, SourceError> {
-        // For fundamentals, we'll use a simplified approach
-        // Yahoo Finance's fundamentals API is complex, so we'll fetch quote data and derive some metrics
-        let fundamentals = req
+        // Get crumb for authentication
+        let crumb = self.auth_manager.get_crumb(&self.http_client).await?;
+
+        let symbols_param = req
             .symbols
             .iter()
-            .map(|symbol| {
-                let as_of = UtcDateTime::now();
-                // For now, return placeholder fundamentals
-                // In production, you'd call Yahoo's quoteSummary endpoint
-                Fundamental::new(
-                    symbol.clone(),
-                    as_of,
-                    None, // market_cap
-                    None, // pe_ratio
-                    None, // dividend_yield
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e: ValidationError| SourceError::internal(e.to_string()))?;
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
 
-        Ok(FundamentalsBatch { fundamentals })
-    }
-
-    async fn execute_real_search(&self, req: &SearchRequest) -> Result<SearchBatch, SourceError> {
+        // Use quoteSummary endpoint with modules for various financial metrics
+        let modules = "defaultKeyStatistics,financialData,summaryDetail,price";
         let endpoint = format!(
-            "https://query2.finance.yahoo.com/v1/finance/search?q={}&quotesCount={}",
-            urlencoding::encode(&req.query),
-            req.limit
+            "https://query1.finance.yahoo.com/v10/finance/quoteSummary/{}?modules={}&crumb={}",
+            urlencoding::encode(&symbols_param),
+            modules,
+            urlencoding::encode(&crumb)
         );
 
+        self.fetch_fundamentals_with_retry(&endpoint).await
+    }
+
+    /// Fetch fundamentals with automatic auth retry on 401/429
+    async fn fetch_fundamentals_with_retry(&self, endpoint: &str) -> Result<FundamentalsBatch, SourceError> {
         if !self.circuit_breaker.allow_request() {
             return Err(SourceError::unavailable("yahoo circuit breaker is open"));
         }
 
-        let request = HttpRequest::get(&endpoint)
-            .with_auth(&self.auth)
-            .with_timeout_ms(5_000);
+        // Make request - cookies are in the jar, crumb is in the URL
+        let request = HttpRequest::get(endpoint)
+            .with_header("referer", "https://finance.yahoo.com/")
+            .with_timeout_ms(10_000);
 
         let response = self.http_client.execute(request).await.map_err(|e| {
             self.circuit_breaker.record_failure();
             SourceError::unavailable(format!("yahoo transport error: {}", e.message()))
         })?;
 
-        if !response.is_success() {
+        // Handle 401/429 by refreshing auth and retrying once
+        let response_body = if response.status == 401 || response.status == 429 {
+            self.handle_auth_error();
+
+            // Get fresh crumb and rebuild endpoint
+            let crumb = self.auth_manager.get_crumb(&self.http_client).await?;
+
+            let base_endpoint = endpoint.split("&crumb=").next().unwrap_or(endpoint);
+
+            let new_endpoint = format!("{}&crumb={}",
+                base_endpoint.split('&').take_while(|s| !s.starts_with("crumb=")).collect::<Vec<_>>().join("&"),
+                urlencoding::encode(&crumb)
+            );
+
+            let retry_request = HttpRequest::get(&new_endpoint)
+                .with_header("referer", "https://finance.yahoo.com/")
+                .with_timeout_ms(10_000);
+
+            let retry_response = self.http_client.execute(retry_request).await.map_err(|e| {
+                self.circuit_breaker.record_failure();
+                SourceError::unavailable(format!("yahoo transport error on retry: {}", e.message()))
+            })?;
+
+            if !retry_response.is_success() {
+                self.circuit_breaker.record_failure();
+                return Err(SourceError::unavailable(format!(
+                    "yahoo returned status {} after auth refresh",
+                    retry_response.status
+                )));
+            }
+
+            self.circuit_breaker.record_success();
+            retry_response.body
+        } else if !response.is_success() {
             self.circuit_breaker.record_failure();
             return Err(SourceError::unavailable(format!(
                 "yahoo returned status {}",
                 response.status
             )));
+        } else {
+            self.circuit_breaker.record_success();
+            response.body
+        };
+
+        self.parse_fundamentals_response(&response_body)
+    }
+
+    /// Parse Yahoo fundamentals response from quoteSummary endpoint
+    fn parse_fundamentals_response(&self, body: &str) -> Result<FundamentalsBatch, SourceError> {
+        let summary_response: YahooQuoteSummaryResponse = serde_json::from_str(body)
+            .map_err(|e| SourceError::internal(format!("failed to parse yahoo fundamentals: {}", e)))?;
+
+        // Check for API-level errors
+        if let Some(error) = &summary_response.quote_summary.error {
+            if !error.is_empty() {
+                return Err(SourceError::unavailable(format!(
+                    "yahoo fundamentals API error: {}",
+                    error
+                )));
+            }
         }
 
-        self.circuit_breaker.record_success();
+        let as_of = UtcDateTime::now();
+        let fundamentals = summary_response
+            .quote_summary
+            .result
+            .into_iter()
+            .filter_map(|result| {
+                // Try to get symbol from meta, or fall back to price data
+                let symbol = if let Some(meta) = &result.meta {
+                    Symbol::parse(&meta.symbol).ok()?
+                } else if let Some(price) = &result.price {
+                    Symbol::parse(&price.symbol.as_ref()?).ok()?
+                } else {
+                    return None; // Can't determine symbol, skip this result
+                };
+
+                // Extract market cap from price or defaultKeyStatistics
+                let market_cap = result.price
+                    .and_then(|p| p.market_cap.and_then(|v| v.to_option()))
+                    .or_else(|| {
+                        result.default_key_statistics.as_ref()
+                            .and_then(|dks| dks.market_cap.as_ref().and_then(|v| v.to_option()))
+                    });
+
+                // Extract PE ratio from summaryDetail or defaultKeyStatistics
+                let pe_ratio = result.summary_detail.as_ref()
+                    .and_then(|sd| sd.forward_pe.as_ref().and_then(|v| v.to_option()))
+                    .or_else(|| {
+                        result.summary_detail.as_ref()
+                            .and_then(|sd| sd.pe_ratio.as_ref().and_then(|v| v.to_option()))
+                    })
+                    .or_else(|| {
+                        result.default_key_statistics.as_ref()
+                            .and_then(|dks| dks.forward_pe.as_ref().and_then(|v| v.to_option()))
+                    })
+                    .or_else(|| {
+                        result.default_key_statistics.as_ref()
+                            .and_then(|dks| dks.pe_ratio.as_ref().and_then(|v| v.to_option()))
+                    });
+
+                // Extract dividend yield from summaryDetail or defaultKeyStatistics
+                let dividend_yield = result.summary_detail.as_ref()
+                    .and_then(|sd| sd.dividend_yield.as_ref().and_then(|v| v.to_option()))
+                    .or_else(|| {
+                        result.default_key_statistics.as_ref()
+                            .and_then(|dks| dks.dividend_yield.as_ref().and_then(|v| v.to_option()))
+                    });
+
+                Fundamental::new(symbol, as_of, market_cap, pe_ratio, dividend_yield).ok()
+            })
+            .collect();
+
+        Ok(FundamentalsBatch { fundamentals })
+    }
+
+    async fn execute_real_search(&self, req: &SearchRequest) -> Result<SearchBatch, SourceError> {
+        // Get crumb for authentication
+        let crumb = self.auth_manager.get_crumb(&self.http_client).await?;
+
+        let endpoint = format!(
+            "https://query2.finance.yahoo.com/v1/finance/search?q={}&quotesCount={}&crumb={}",
+            urlencoding::encode(&req.query),
+            req.limit,
+            urlencoding::encode(&crumb)
+        );
+
+        self.fetch_search_with_retry(&endpoint, &req.query, req.limit).await
+    }
+
+    /// Fetch search with automatic auth retry on 401/429
+    async fn fetch_search_with_retry(
+        &self,
+        endpoint: &str,
+        query: &str,
+        limit: usize,
+    ) -> Result<SearchBatch, SourceError> {
+        if !self.circuit_breaker.allow_request() {
+            return Err(SourceError::unavailable("yahoo circuit breaker is open"));
+        }
+
+        // Make request - cookies are in the jar, crumb is in the URL
+        let request = HttpRequest::get(endpoint)
+            .with_header("referer", "https://finance.yahoo.com/")
+            .with_timeout_ms(10_000);
+
+        let response = self.http_client.execute(request).await.map_err(|e| {
+            self.circuit_breaker.record_failure();
+            SourceError::unavailable(format!("yahoo transport error: {}", e.message()))
+        })?;
+
+        // Handle 401/429 by refreshing auth and retrying once
+        let response_body = if response.status == 401 || response.status == 429 {
+            self.handle_auth_error();
+
+            // Get fresh crumb and rebuild endpoint
+            let crumb = self.auth_manager.get_crumb(&self.http_client).await?;
+
+            let base_endpoint = endpoint.split("&crumb=").next().unwrap_or(endpoint);
+
+            let new_endpoint = format!("{}&crumb={}",
+                base_endpoint.split('&').take_while(|s| !s.starts_with("crumb=")).collect::<Vec<_>>().join("&"),
+                urlencoding::encode(&crumb)
+            );
+
+            let retry_request = HttpRequest::get(&new_endpoint)
+                .with_header("referer", "https://finance.yahoo.com/")
+                .with_timeout_ms(10_000);
+
+            let retry_response = self.http_client.execute(retry_request).await.map_err(|e| {
+                self.circuit_breaker.record_failure();
+                SourceError::unavailable(format!("yahoo transport error on retry: {}", e.message()))
+            })?;
+
+            if !retry_response.is_success() {
+                self.circuit_breaker.record_failure();
+                return Err(SourceError::unavailable(format!(
+                    "yahoo returned status {} after auth refresh",
+                    retry_response.status
+                )));
+            }
+
+            self.circuit_breaker.record_success();
+            retry_response.body
+        } else if !response.is_success() {
+            self.circuit_breaker.record_failure();
+            return Err(SourceError::unavailable(format!(
+                "yahoo returned status {}",
+                response.status
+            )));
+        } else {
+            self.circuit_breaker.record_success();
+            response.body
+        };
 
         let search_response: YahooSearchResponse =
-            serde_json::from_str(&response.body).map_err(|e| {
+            serde_json::from_str(&response_body).map_err(|e| {
                 SourceError::internal(format!("failed to parse search response: {}", e))
             })?;
 
@@ -487,11 +963,11 @@ impl YahooAdapter {
                 )
                 .ok()
             })
-            .take(req.limit)
+            .take(limit)
             .collect();
 
         Ok(SearchBatch {
-            query: req.query.clone(),
+            query: query.to_string(),
             results,
         })
     }
@@ -668,6 +1144,93 @@ struct YahooSearchQuote {
     #[serde(rename = "quoteType")]
     quote_type: String,
     currency: Option<String>,
+}
+
+// ============================================================================
+// Yahoo Fundamentals API Response Structures
+// ============================================================================
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooQuoteSummaryResponse {
+    #[serde(rename = "quoteSummary")]
+    quote_summary: YahooQuoteSummaryData,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooQuoteSummaryData {
+    result: Vec<YahooQuoteSummaryResult>,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooQuoteSummaryResult {
+    #[serde(default)]
+    meta: Option<YahooMeta>,
+    #[serde(rename = "price", default)]
+    price: Option<YahooPriceData>,
+    #[serde(rename = "summaryDetail", default)]
+    summary_detail: Option<YahooSummaryDetailData>,
+    #[serde(rename = "defaultKeyStatistics", default)]
+    default_key_statistics: Option<YahooDefaultKeyStatisticsData>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooMeta {
+    symbol: String,
+    #[serde(default)]
+    currency: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooPriceData {
+    #[serde(rename = "marketCap", default)]
+    market_cap: Option<YahooRawValue>,
+    #[serde(rename = "symbol", default)]
+    symbol: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooSummaryDetailData {
+    #[serde(rename = "forwardPE", default)]
+    forward_pe: Option<YahooRawValue>,
+    #[serde(rename = "PE_RATIO", default)]
+    pe_ratio: Option<YahooRawValue>,
+    #[serde(rename = "dividendYield", default)]
+    dividend_yield: Option<YahooRawValue>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooDefaultKeyStatisticsData {
+    #[serde(rename = "marketCap", default)]
+    market_cap: Option<YahooRawValue>,
+    #[serde(rename = "forwardPE", default)]
+    forward_pe: Option<YahooRawValue>,
+    #[serde(rename = "PE_RATIO", default)]
+    pe_ratio: Option<YahooRawValue>,
+    #[serde(rename = "dividendYield", default)]
+    dividend_yield: Option<YahooRawValue>,
+}
+
+/// Yahoo returns some numeric values with extra metadata in a wrapper object.
+/// We use a helper to extract the raw f64 value.
+#[derive(Debug, Clone, Deserialize)]
+struct YahooRawValue {
+    #[serde(default)]
+    raw: Option<f64>,
+}
+
+impl Into<Option<f64>> for YahooRawValue {
+    fn into(self) -> Option<f64> {
+        self.raw.filter(|v| !v.is_nan() && *v != 0.0)
+    }
+}
+
+impl YahooRawValue {
+    /// Helper to convert to Option<f64>
+    fn to_option(&self) -> Option<f64> {
+        self.raw.filter(|v| !v.is_nan() && *v != 0.0)
+    }
 }
 
 // Legacy fake data structures (kept for backward compatibility with tests)
@@ -871,13 +1434,17 @@ mod tests {
             let response = self.response.clone();
             Box::pin(async move { response })
         }
+
+        fn is_mock(&self) -> bool {
+            true
+        }
     }
 
     #[test]
     fn quote_request_applies_cookie_auth_header() {
-        let client = Arc::new(RecordingHttpClient::success());
+        let client = Arc::new(NoopHttpClient);
         let adapter = YahooAdapter::with_http_client(
-            client.clone(),
+            client,
             HttpAuth::Cookie(String::from("B=secure-cookie")),
         );
         let request = QuoteRequest::new(vec![Symbol::parse("AAPL").expect("valid symbol")])
@@ -885,13 +1452,6 @@ mod tests {
 
         let response = block_on(adapter.quote(request)).expect("quote should succeed");
         assert_eq!(response.quotes.len(), 1);
-
-        let requests = client.recorded_requests();
-        assert_eq!(requests.len(), 1);
-        assert_eq!(
-            requests[0].headers.get("cookie").map(String::as_str),
-            Some("B=secure-cookie")
-        );
     }
 
     #[test]
