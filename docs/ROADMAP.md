@@ -1,7 +1,7 @@
 # Rust Financial Data CLI: Consensus Roadmap and Technical Spec
 
-**Last Updated**: 2026-02-20
-**Current Status**: Phase 5 Complete ✅ | Phase 6-7 Pending
+**Last Updated**: 2026-02-23
+**Current Status**: Phase 6 Complete ✅ | Phase 7 Pending
 
 ## Implementation Status
 
@@ -12,9 +12,7 @@
 - **Phase 3**: Local Cache (Parquet + Manifest) ✅
 - **Phase 4**: DuckDB Warehouse and Analytics Views ✅
 - **Phase 5**: Remaining Providers (Alpha Vantage + Alpaca) ✅
-
-### 🚧 In Progress
-- **Phase 6**: AI-Agent UX and Streaming (Not started)
+- **Phase 6**: AI-Agent UX and Streaming ✅
 
 ### 📋 Planned
 - **Phase 7**: Performance Hardening and Release
@@ -234,36 +232,42 @@ All adapters are located in `crates/ferrotick-core/src/adapters/`:
 - `alphavantage.rs` - Alpha Vantage adapter
 - `alpaca.rs` - Alpaca Markets adapter
 
-## Phase 6: AI-Agent UX and Streaming (Weeks 13-14) 🚧 NOT STARTED
+## Phase 6: AI-Agent UX and Streaming (Weeks 13-14) ✅ COMPLETE
 
 ### Status
-- ❌ Not implemented
-- 📋 Planned for future release
+- ✅ All tasks completed
+- ✅ `ferrotick-agent` crate implemented with full streaming support
 
 ### Tasks
-1. Implement strict JSON envelope everywhere. ❌
-2. Implement NDJSON event stream mode (`--stream`): ❌
+1. Implement strict JSON envelope everywhere. ✅
+2. Implement NDJSON event stream mode (`--stream`): ✅
    - `start`, `progress`, `chunk`, `end`, `error`.
-3. Implement schema introspection commands: ❌
+3. Implement schema introspection commands: ✅
    - `ferrotick schema list`
    - `ferrotick schema get <name>`
-4. Add machine metadata: ❌
+4. Add machine metadata: ✅
    - `request_id`, `trace_id`, `source_chain`, `latency_ms`, `cache_hit`, `warnings`.
-5. Add deterministic ordering and stable numeric formatting. ❌
-6. Add `--explain` mode for query/source-plan diagnostics. ❌
+5. Add deterministic ordering and stable numeric formatting. ✅
+6. Add `--explain` mode for query/source-plan diagnostics. ✅
 
 ### Deliverables
-- AI-ready command protocol with streaming. ❌
+- AI-ready command protocol with streaming. ✅
 
 ### Acceptance Criteria
-- 100% commands emit valid schema-compliant JSON in strict mode. ❌
-- Streaming consumers can parse 100k events with zero malformed lines. ❌
+- 100% commands emit valid schema-compliant JSON in strict mode. ✅
+- Streaming consumers can parse 100k events with zero malformed lines. ✅
 
 ### Implementation Notes
-This phase requires creating a new `ferrotick-agent` crate with:
-- NDJSON streaming protocol
-- Schema registry
-- AI agent interfaces
+All Phase 6 components are in `crates/ferrotick-agent/`:
+- `envelope.rs` - JSON envelope construction and validation
+- `stream.rs` - NDJSON streaming implementation
+- `schema_registry.rs` - Schema management and validation
+- `metadata.rs` - Request tracking with request_id, trace_id, etc.
+
+CLI integration in `crates/ferrotick-cli/`:
+- `--stream` flag for NDJSON output
+- `--explain` flag for diagnostics
+- `schema list` and `schema get` commands
 
 ## Phase 7: Performance Hardening and Release (Weeks 15-16)
 ### Tasks
