@@ -13,7 +13,7 @@ mod warehouse_sync;
 use ferrotick_core::{Endpoint, Envelope, ProviderId, SourceRouter, SourceRouterBuilder, SourceStrategy};
 use serde_json::Value;
 
-use crate::cli::{CacheCommand, Cli, Command, ExportArgs, SourceSelector};
+use crate::cli::{CacheCommand, Cli, Command, SourceSelector};
 use crate::error::CliError;
 use crate::metadata::Metadata;
 

@@ -127,7 +127,7 @@ impl PolygonAdapter {
             .into_iter()
             .filter_map(|result| {
                 let sym = Symbol::parse(&result.ticker).ok()?;
-                let ts_offset = time::OffsetDateTime::from_unix_timestamp(result.t as i64)
+                let ts_offset = time::OffsetDateTime::from_unix_timestamp(result.t)
                     .ok()?;
                 let ts = UtcDateTime::from_offset_datetime(ts_offset).ok()?;
 
@@ -206,7 +206,7 @@ impl PolygonAdapter {
 
         let mut bars = Vec::new();
         for result in polygon_response.results.into_iter().take(req.limit) {
-            let ts_offset = time::OffsetDateTime::from_unix_timestamp(result.t as i64)
+            let ts_offset = time::OffsetDateTime::from_unix_timestamp(result.t)
                 .map_err(|e| SourceError::internal(format!("invalid timestamp: {}", e)))?;
             let ts = UtcDateTime::from_offset_datetime(ts_offset)
                 .map_err(|e| SourceError::internal(format!("timestamp not UTC: {}", e)))?;
@@ -801,25 +801,11 @@ mod tests {
     }
 
     impl RecordingHttpClient {
-        fn success() -> Self {
-            Self {
-                response: Ok(HttpResponse::ok_json("{}")),
-                requests: Mutex::new(Vec::new()),
-            }
-        }
-
         fn failure() -> Self {
             Self {
                 response: Err(HttpError::new("network error")),
                 requests: Mutex::new(Vec::new()),
             }
-        }
-
-        fn recorded_requests(&self) -> Vec<HttpRequest> {
-            self.requests
-                .lock()
-                .expect("request store should not be poisoned")
-                .clone()
         }
     }
 

@@ -1,7 +1,7 @@
 //! Load historical data from providers into the warehouse cache.
 
 use ferrotick_core::{
-    BarSeries, BarsRequest, Interval, ProviderId, SourceRouter, SourceStrategy, Symbol, UtcDateTime,
+    BarsRequest, Interval, ProviderId, SourceRouter, SourceStrategy, Symbol, UtcDateTime,
 };
 use ferrotick_warehouse::BarRecord;
 
@@ -16,7 +16,7 @@ pub async fn run(
     strategy: SourceStrategy,
 ) -> Result<CommandResult, CliError> {
     let symbol = Symbol::parse(&args.symbol)
-        .map_err(|e| CliError::Validation(e))?;
+        .map_err(CliError::Validation)?;
 
     let warehouse = ferrotick_warehouse::Warehouse::open_default()
         .map_err(|error| CliError::Command(error.to_string()))?;
@@ -39,7 +39,7 @@ pub async fn run(
     let bars_request = BarsRequest::new(symbol.clone(), interval, limit)?;
     let route_result = router.route_bars(&bars_request, strategy).await;
 
-    let data = match route_result {
+    match route_result {
         Ok(result) => {
             let bars = result.data;
             let source_chain = result.source_chain.clone();
@@ -69,7 +69,7 @@ pub async fn run(
                         &format!("bars_{}", interval_str(interval)),
                         &request_id,
                         &bar_records,
-                        result.latency_ms as u64,
+                        result.latency_ms,
                     )
                     .map_err(|error| CliError::Command(error.to_string()))?;
 
@@ -85,10 +85,10 @@ pub async fn run(
                 cached_at: UtcDateTime::now().format_rfc3339(),
             })?;
 
-            return Ok(CommandResult::ok(response_value, source_chain));
+            Ok(CommandResult::ok(response_value, source_chain))
         }
         Err(failure) => {
-            return Ok(
+            Ok(
                 CommandResult::ok(
                     serde_json::to_value(CacheLoadResponse {
                         symbol: args.symbol.clone(),
@@ -101,11 +101,9 @@ pub async fn run(
                     failure.source_chain,
                 )
                 .with_errors(failure.errors)
-            );
+            )
         }
-    };
-
-    Ok(CommandResult::ok(data, vec![]))
+    }
 }
 
 #[derive(Debug, serde::Serialize)]

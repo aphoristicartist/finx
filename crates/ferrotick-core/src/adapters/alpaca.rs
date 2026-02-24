@@ -529,49 +529,7 @@ fn validation_to_error(error: ValidationError) -> SourceError {
 mod tests {
     use super::*;
     use crate::data_source::SourceErrorKind;
-    use crate::http_client::{HttpError, HttpResponse};
-    use std::sync::Mutex;
     use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
-
-    #[derive(Debug)]
-    struct RecordingHttpClient {
-        response: Result<HttpResponse, HttpError>,
-        requests: Mutex<Vec<HttpRequest>>,
-    }
-
-    impl RecordingHttpClient {
-        fn success() -> Self {
-            Self {
-                response: Ok(HttpResponse::ok_json("{}")),
-                requests: Mutex::new(Vec::new()),
-            }
-        }
-
-        fn recorded_requests(&self) -> Vec<HttpRequest> {
-            self.requests
-                .lock()
-                .expect("request store should not be poisoned")
-                .clone()
-        }
-    }
-
-    impl HttpClient for RecordingHttpClient {
-        fn execute<'a>(
-            &'a self,
-            request: HttpRequest,
-        ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, HttpError>> + Send + 'a>> {
-            self.requests
-                .lock()
-                .expect("request store should not be poisoned")
-                .push(request);
-            let response = self.response.clone();
-            Box::pin(async move { response })
-        }
-
-        fn is_mock(&self) -> bool {
-            true
-        }
-    }
 
     #[test]
     fn quote_request_applies_dual_alpaca_auth_headers() {

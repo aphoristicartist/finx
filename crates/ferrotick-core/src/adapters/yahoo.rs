@@ -39,8 +39,6 @@ pub struct YahooAuthManager {
     refreshing: Arc<AtomicBool>,
     /// Auth TTL in seconds (default: 1 hour)
     auth_ttl_secs: u64,
-    /// Whether to use environment variable override for auth
-    use_env_override: bool,
 }
 
 impl Default for YahooAuthManager {
@@ -51,7 +49,6 @@ impl Default for YahooAuthManager {
             last_refresh: Arc::new(std::sync::Mutex::new(None)),
             refreshing: Arc::new(AtomicBool::new(false)),
             auth_ttl_secs: 3600, // 1 hour
-            use_env_override: true,
         }
     }
 }
@@ -91,19 +88,6 @@ impl YahooAuthManager {
         // Return new crumb
         let crumb = self.crumb.lock().unwrap().clone();
         crumb.ok_or_else(|| SourceError::unavailable("failed to obtain Yahoo crumb"))
-    }
-
-    /// Get current auth (cookies are managed by the jar, crumb is in URL params)
-    pub async fn get_auth(&self, http_client: &Arc<dyn HttpClient>) -> Result<HttpAuth, SourceError> {
-        if self.use_env_override {
-            if let Some(auth) = Self::get_env_auth() {
-                return Ok(auth);
-            }
-        }
-        if !self.is_auth_valid() {
-            self.refresh_auth(http_client).await?;
-        }
-        Ok(HttpAuth::None) // Cookies managed by jar, no manual auth needed
     }
 
     /// Refresh auth by fetching cookie and crumb from Yahoo
@@ -162,7 +146,7 @@ impl YahooAuthManager {
                     }
 
                     // Validate crumb (should not be too long, contain reasonable characters)
-                    if body.len() > 0 && body.len() < 100 && !body.contains(' ') {
+                    if !body.is_empty() && body.len() < 100 && !body.contains(' ') {
                         *self.crumb.lock().unwrap() = Some(body.to_string());
                         *self.last_refresh.lock().unwrap() = Some(Instant::now());
                         return Ok(());
@@ -175,20 +159,12 @@ impl YahooAuthManager {
         Err(SourceError::unavailable("failed to fetch Yahoo crumb from all endpoints"))
     }
 
-    /// Get auth from environment variables (for testing/override)
-    fn get_env_auth() -> Option<HttpAuth> {
-        std::env::var("YAHOO_COOKIE")
-            .ok()
-            .map(|cookie| HttpAuth::Cookie(cookie))
-    }
-
     /// Invalidate cached auth (triggers refresh on next call)
     pub fn invalidate(&self) {
         *self.cookie.lock().unwrap() = None;
         *self.crumb.lock().unwrap() = None;
         *self.last_refresh.lock().unwrap() = None;
     }
-
 }
 
 // ============================================================================
@@ -810,7 +786,7 @@ impl YahooAdapter {
                 let symbol = if let Some(meta) = &result.meta {
                     Symbol::parse(&meta.symbol).ok()?
                 } else if let Some(price) = &result.price {
-                    Symbol::parse(&price.symbol.as_ref()?).ok()?
+                    Symbol::parse(price.symbol.as_ref()?).ok()?
                 } else {
                     return None; // Can't determine symbol, skip this result
                 };
@@ -1178,8 +1154,6 @@ struct YahooQuoteSummaryResult {
 #[derive(Debug, Clone, Deserialize)]
 struct YahooMeta {
     symbol: String,
-    #[serde(default)]
-    currency: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1220,9 +1194,9 @@ struct YahooRawValue {
     raw: Option<f64>,
 }
 
-impl Into<Option<f64>> for YahooRawValue {
-    fn into(self) -> Option<f64> {
-        self.raw.filter(|v| !v.is_nan() && *v != 0.0)
+impl From<YahooRawValue> for Option<f64> {
+    fn from(val: YahooRawValue) -> Self {
+        val.raw.filter(|v| !v.is_nan() && *v != 0.0)
     }
 }
 
@@ -1400,25 +1374,11 @@ mod tests {
     }
 
     impl RecordingHttpClient {
-        fn success() -> Self {
-            Self {
-                response: Ok(HttpResponse::ok_json("{}")),
-                requests: Mutex::new(Vec::new()),
-            }
-        }
-
         fn failure() -> Self {
             Self {
                 response: Err(HttpError::new("upstream timeout")),
                 requests: Mutex::new(Vec::new()),
             }
-        }
-
-        fn recorded_requests(&self) -> Vec<HttpRequest> {
-            self.requests
-                .lock()
-                .expect("request store should not be poisoned")
-                .clone()
         }
     }
 

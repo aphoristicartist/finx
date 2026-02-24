@@ -5,10 +5,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Defines the behavior of the in-memory cache for an API call.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CacheMode {
     /// Read from the cache if a non-expired entry is present;
     /// otherwise, fetch from the network and write the response to the cache. (Default)
+    #[default]
     Use,
     /// Always fetch from the network, bypassing any cached entry,
     /// and write the new response to the cache.
@@ -17,11 +18,6 @@ pub enum CacheMode {
     Bypass,
 }
 
-impl Default for CacheMode {
-    fn default() -> Self {
-        Self::Use
-    }
-}
 
 #[derive(Debug, Clone)]
 struct CacheEntry {
@@ -70,6 +66,10 @@ impl CacheInner {
 
     fn len(&self) -> usize {
         self.map.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.map.is_empty()
     }
 }
 
@@ -139,6 +139,12 @@ impl CacheStore {
     pub async fn len(&self) -> usize {
         let store = self.inner.read().await;
         store.len()
+    }
+
+    /// Check if the cache is empty.
+    pub async fn is_empty(&self) -> bool {
+        let store = self.inner.read().await;
+        store.is_empty()
     }
 
     /// Check if the cache is disabled (TTL is ZERO).
