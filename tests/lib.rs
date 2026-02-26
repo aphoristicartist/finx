@@ -5,7 +5,10 @@ pub use ferrotick_core::{
         BarsRequest, CapabilitySet, DataSource, Endpoint, FundamentalsBatch, FundamentalsRequest,
         HealthState, HealthStatus, QuoteBatch, QuoteRequest, SearchBatch, SearchRequest, SourceError,
     },
-    routing::{SourceRouter, SourceStrategy},
+    routing::{SourceRouter, SourceRouterBuilder, SourceStrategy},
+    http_client::{HttpAuth, NoopHttpClient},
     ProviderId, Symbol,
 };
 pub use std::sync::Arc;
+
+pub mod test_helpers;

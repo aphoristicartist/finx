@@ -66,7 +66,6 @@ to multiple market data providers. Features include:\n\
   • Secure parameterized SQL queries\n\
   • AI-agent streaming mode\n\
   • Structured JSON output with metadata\n\
-  • Real API calls with fallback to mock mode\n\
 \n\
 Use 'ferrotick <command> --help' for command-specific help."
 )]
@@ -100,14 +99,6 @@ pub struct Cli {
     /// Enable profiling metadata in output (placeholder).
     #[arg(long, global = true, default_value_t = false)]
     pub profile: bool,
-
-    /// Use mock mode with deterministic fake data instead of real API calls.
-    ///
-    /// This is useful for testing without making real API calls or when
-    /// API keys are not available. When enabled, all providers return
-    /// deterministic mock data.
-    #[arg(long, global = true, default_value_t = false)]
-    pub mock: bool,
 
     /// Enable NDJSON streaming mode for AI agents.
     ///

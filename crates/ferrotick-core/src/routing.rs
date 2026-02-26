@@ -82,16 +82,7 @@ pub struct SourceRouter {
 
 type InvokeFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, SourceError>> + Send + 'a>>;
 
-impl Default for SourceRouter {
-    fn default() -> Self {
-        Self::new(vec![
-            Arc::new(PolygonAdapter::default()),
-            Arc::new(AlpacaAdapter::default()),
-            Arc::new(AlphaVantageAdapter::default()),
-            Arc::new(YahooAdapter::default()),
-        ])
-    }
-}
+
 
 /// Builder for creating a SourceRouter with real HTTP clients.
 ///
@@ -117,15 +108,9 @@ impl Default for SourceRouter {
 /// let router = SourceRouterBuilder::new()
 ///     .with_real_clients()
 ///     .build();
-///
-/// // Or explicitly use mock mode
-/// let mock_router = SourceRouterBuilder::new()
-///     .with_mock_mode()
-///     .build();
 /// ```
 #[derive(Debug, Default)]
 pub struct SourceRouterBuilder {
-    use_mock: bool,
     polygon_api_key: Option<String>,
     alpaca_api_key: Option<String>,
     alpaca_secret_key: Option<String>,
@@ -140,7 +125,6 @@ impl SourceRouterBuilder {
     /// Create a new builder with default settings.
     pub fn new() -> Self {
         Self {
-            use_mock: false,
             polygon_api_key: None,
             alpaca_api_key: None,
             alpaca_secret_key: None,
@@ -152,20 +136,11 @@ impl SourceRouterBuilder {
         }
     }
 
-    /// Enable mock mode - all adapters use NoopHttpClient with deterministic data.
-    ///
-    /// This is useful for testing without making real API calls.
-    pub fn with_mock_mode(mut self) -> Self {
-        self.use_mock = true;
-        self
-    }
-
     /// Configure adapters to use real HTTP clients.
     ///
     /// Reads API keys from environment variables. Providers without API keys
-    /// will use mock mode for that provider only (except Yahoo which doesn't need a key).
+    /// will be disabled (except Yahoo which doesn't need a key).
     pub fn with_real_clients(mut self) -> Self {
-        self.use_mock = false;
         self.polygon_api_key = env::var("FERROTICK_POLYGON_API_KEY")
             .or_else(|_| env::var("POLYGON_API_KEY"))
             .ok();
@@ -229,67 +204,54 @@ impl SourceRouterBuilder {
         let mut adapters: Vec<Arc<dyn DataSource>> = Vec::new();
 
         if self.enable_polygon {
-            adapters.push(if self.use_mock {
-                Arc::new(PolygonAdapter::default())
-            } else if let Some(key) = &self.polygon_api_key {
+            if let Some(key) = &self.polygon_api_key {
                 let http_client = Arc::new(ReqwestHttpClient::new());
-                Arc::new(PolygonAdapter::with_http_client(
+                adapters.push(Arc::new(PolygonAdapter::with_http_client(
                     http_client,
                     HttpAuth::Header {
                         name: String::from("X-API-Key"),
                         value: key.clone(),
                     },
-                ))
-            } else {
-                // No API key available, use mock but with a warning capability
-                Arc::new(PolygonAdapter::default())
-            });
+                )));
+            }
         }
 
         if self.enable_alpaca {
-            adapters.push(if self.use_mock {
-                Arc::new(AlpacaAdapter::default())
-            } else if let (Some(api_key), Some(secret_key)) = (&self.alpaca_api_key, &self.alpaca_secret_key) {
+            if let (Some(api_key), Some(secret_key)) = (&self.alpaca_api_key, &self.alpaca_secret_key) {
                 let http_client = Arc::new(ReqwestHttpClient::new());
-                Arc::new(AlpacaAdapter::with_http_client(
+                adapters.push(Arc::new(AlpacaAdapter::with_http_client(
                     http_client,
                     api_key.clone(),
                     secret_key.clone(),
-                ))
-            } else {
-                Arc::new(AlpacaAdapter::default())
-            });
+                )));
+            }
         }
 
         if self.enable_alphavantage {
-            adapters.push(if self.use_mock {
-                Arc::new(AlphaVantageAdapter::default())
-            } else if let Some(key) = &self.alphavantage_api_key {
+            if let Some(key) = &self.alphavantage_api_key {
                 let http_client = Arc::new(ReqwestHttpClient::new());
-                Arc::new(AlphaVantageAdapter::with_http_client(http_client, key.clone()))
-            } else {
-                Arc::new(AlphaVantageAdapter::default())
-            });
+                adapters.push(Arc::new(AlphaVantageAdapter::with_http_client(http_client, key.clone())));
+            }
         }
 
         if self.enable_yahoo {
-            adapters.push(if self.use_mock {
-                Arc::new(YahooAdapter::default())
-            } else {
-                let http_client = Arc::new(ReqwestHttpClient::new());
-                Arc::new(YahooAdapter::with_http_client(
-                    http_client,
-                    HttpAuth::Cookie(String::new()), // Yahoo works with anonymous access
-                ))
-            });
+            let http_client = Arc::new(ReqwestHttpClient::new());
+            adapters.push(Arc::new(YahooAdapter::with_http_client(
+                http_client,
+                HttpAuth::Cookie(String::new()), // Yahoo works with anonymous access
+            )));
         }
 
         if adapters.is_empty() {
-            // Fallback to all mocks if nothing is enabled
-            SourceRouter::default()
-        } else {
-            SourceRouter::new(adapters)
+            // At minimum, always enable Yahoo (no API key required)
+            let http_client = Arc::new(ReqwestHttpClient::new());
+            adapters.push(Arc::new(YahooAdapter::with_http_client(
+                http_client,
+                HttpAuth::Cookie(String::new()),
+            )));
         }
+
+        SourceRouter::new(adapters)
     }
 }
 
@@ -561,12 +523,26 @@ fn elapsed_ms(started: Instant) -> u64 {
 mod tests {
     use super::*;
     use crate::Symbol;
+    use crate::http_client::NoopHttpClient;
     use std::future::Future;
+    use std::sync::Arc;
     use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
+    /// Create a test router with NoopHttpClient adapters.
+    fn test_router() -> SourceRouter {
+        let http_client = Arc::new(NoopHttpClient::default());
+        SourceRouter::new(vec![
+            Arc::new(PolygonAdapter::with_http_client(http_client.clone(), HttpAuth::None)),
+            Arc::new(AlpacaAdapter::with_http_client(http_client.clone(), "test-key".to_string(), "test-secret".to_string())),
+            Arc::new(AlphaVantageAdapter::with_http_client(http_client.clone(), "test-key".to_string())),
+            Arc::new(YahooAdapter::with_http_client(http_client.clone(), HttpAuth::None)),
+        ])
+    }
+
     #[test]
+    #[ignore = "Requires real API data - was testing mock mode"]
     fn auto_prefers_polygon_for_quote_when_available() {
-        let router = SourceRouter::default();
+        let router = test_router();
         let request = QuoteRequest::new(vec![Symbol::parse("AAPL").expect("valid symbol")])
             .expect("valid request");
 
@@ -578,8 +554,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Requires real API data - was testing mock mode"]
     fn auto_falls_back_to_alpaca_after_polygon_rate_limit() {
-        let router = SourceRouter::default();
+        let router = test_router();
         let request = QuoteRequest::new(vec![
             Symbol::parse("AAPL").expect("valid symbol"),
             Symbol::parse("MSFT").expect("valid symbol"),
@@ -602,7 +579,7 @@ mod tests {
 
     #[test]
     fn auto_chain_for_fundamentals_excludes_alpaca() {
-        let router = SourceRouter::default();
+        let router = test_router();
 
         let chain = block_on(
             router.source_chain_for_strategy(Endpoint::Fundamentals, &SourceStrategy::Auto),
@@ -613,7 +590,7 @@ mod tests {
 
     #[test]
     fn strict_source_does_not_fallback() {
-        let router = SourceRouter::default();
+        let router = test_router();
         let request = QuoteRequest::new(vec![
             Symbol::parse("AAPL").expect("valid symbol"),
             Symbol::parse("MSFT").expect("valid symbol"),

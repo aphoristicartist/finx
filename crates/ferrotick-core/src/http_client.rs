@@ -150,12 +150,6 @@ pub trait HttpClient: Send + Sync {
         &'a self,
         request: HttpRequest,
     ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, HttpError>> + Send + 'a>>;
-
-    /// Returns true if this is a mock/test client that doesn't make real HTTP calls.
-    /// Default implementation returns false (real client).
-    fn is_mock(&self) -> bool {
-        false
-    }
 }
 
 /// Default no-op transport for deterministic offline tests.
@@ -169,10 +163,6 @@ impl HttpClient for NoopHttpClient {
     ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, HttpError>> + Send + 'a>> {
         let _ = request;
         Box::pin(async move { Ok(HttpResponse::ok_json("{}")) })
-    }
-
-    fn is_mock(&self) -> bool {
-        true
     }
 }
 

@@ -1,51 +1,44 @@
 use ferrotick_core::{
-    adapters::{AlpacaAdapter, AlphaVantageAdapter, PolygonAdapter, YahooAdapter},
-    data_source::{
-        BarsRequest, CapabilitySet, DataSource, Endpoint, FundamentalsBatch, FundamentalsRequest,
-        HealthState, HealthStatus, QuoteBatch, QuoteRequest, SearchBatch, SearchRequest, SourceError,
-    },
+    data_source::{BarsRequest, Endpoint, HealthState, QuoteRequest, SearchRequest},
     routing::{SourceRouter, SourceStrategy},
     ProviderId, Symbol,
 };
-use std::time::Duration;
 use std::sync::Arc;
+
+mod test_helpers;
+use test_helpers::{mock_alpaca, mock_alphavantage, mock_polygon, mock_yahoo, mock_router};
 
 #[tokio::test]
 async fn test_polygon_adapter_exists() {
-    let adapter = Arc::new(PolygonAdapter::default());
+    let adapter = Arc::new(mock_polygon());
     assert_eq!(adapter.id(), ProviderId::Polygon);
     assert!(!adapter.capabilities().is_empty());
 }
 
 #[tokio::test]
 async fn test_yahoo_adapter_exists() {
-    let adapter = Arc::new(YahooAdapter::default());
+    let adapter = Arc::new(mock_yahoo());
     assert_eq!(adapter.id(), ProviderId::Yahoo);
     assert!(!adapter.capabilities().is_empty());
 }
 
 #[tokio::test]
 async fn test_alpaca_adapter_exists() {
-    let adapter = Arc::new(AlpacaAdapter::default());
+    let adapter = Arc::new(mock_alpaca());
     assert_eq!(adapter.id(), ProviderId::Alpaca);
     assert!(!adapter.capabilities().is_empty());
 }
 
 #[tokio::test]
 async fn test_alphavantage_adapter_exists() {
-    let adapter = Arc::new(AlphaVantageAdapter::default());
+    let adapter = Arc::new(mock_alphavantage());
     assert_eq!(adapter.id(), ProviderId::AlphaVantage);
     assert!(!adapter.capabilities().is_empty());
 }
 
 #[tokio::test]
 async fn test_router_initializes_with_all_adapters() {
-    let router = SourceRouter::new(vec![
-        Arc::new(PolygonAdapter::default()),
-        Arc::new(AlpacaAdapter::default()),
-        Arc::new(AlphaVantageAdapter::default()),
-        Arc::new(YahooAdapter::default()),
-    ]);
+    let router = mock_router();
 
     assert_eq!(router.adapters.len(), 4);
     assert!(router.adapters.contains_key(&ProviderId::Polygon));
@@ -95,7 +88,7 @@ async fn test_quote_request_with_invalid_symbol() {
 
 #[tokio::test]
 async fn test_router_has_auto_strategy() {
-    let router = SourceRouter::default();
+    let router = mock_router();
     let strategy = SourceStrategy::Auto;
 
     let chain = router.source_chain_for_strategy(Endpoint::Quote, &strategy).await;
@@ -104,7 +97,7 @@ async fn test_router_has_auto_strategy() {
 
 #[tokio::test]
 async fn test_router_has_strict_strategy() {
-    let router = SourceRouter::default();
+    let router = mock_router();
     let strategy = SourceStrategy::Strict(ProviderId::Polygon);
 
     let chain = router.source_chain_for_strategy(Endpoint::Quote, &strategy).await;
@@ -113,7 +106,7 @@ async fn test_router_has_strict_strategy() {
 
 #[tokio::test]
 async fn test_adapter_capabilities() {
-    let polygon = PolygonAdapter::default();
+    let polygon = mock_polygon();
     let capabilities = polygon.capabilities();
     assert!(capabilities.contains(&Endpoint::Quote));
     assert!(capabilities.contains(&Endpoint::Bars));
@@ -121,7 +114,7 @@ async fn test_adapter_capabilities() {
 
 #[tokio::test]
 async fn test_adapter_health_state() {
-    let yahoo = YahooAdapter::default();
+    let yahoo = mock_yahoo();
     let health = yahoo.health().await;
 
     assert_eq!(health.state, HealthState::Healthy);
@@ -129,7 +122,7 @@ async fn test_adapter_health_state() {
 
 #[tokio::test]
 async fn test_alpaca_adapter_has_required_endpoints() {
-    let alpaca = AlpacaAdapter::default();
+    let alpaca = mock_alpaca();
     let capabilities = alpaca.capabilities();
 
     assert!(capabilities.contains(&Endpoint::Quote));
@@ -138,7 +131,7 @@ async fn test_alpaca_adapter_has_required_endpoints() {
 
 #[tokio::test]
 async fn test_alphavantage_adapter_has_fundamentals() {
-    let alphavantage = AlphaVantageAdapter::default();
+    let alphavantage = mock_alphavantage();
     let capabilities = alphavantage.capabilities();
 
     assert!(capabilities.contains(&Endpoint::Fundamentals));
