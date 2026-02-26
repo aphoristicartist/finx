@@ -183,6 +183,153 @@ impl Fundamental {
     }
 }
 
+/// Financial statement type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StatementType {
+    Income,
+    Balance,
+    CashFlow,
+}
+
+/// Financial period type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FinancialPeriod {
+    Annual,
+    Quarterly,
+}
+
+/// Single financial statement line item.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FinancialLineItem {
+    pub label: String,
+    pub value: Option<f64>,
+    pub fiscal_year: Option<i32>,
+    pub fiscal_quarter: Option<i32>,
+    pub end_date: UtcDateTime,
+}
+
+impl FinancialLineItem {
+    pub fn new(
+        label: impl Into<String>,
+        value: Option<f64>,
+        fiscal_year: Option<i32>,
+        fiscal_quarter: Option<i32>,
+        end_date: UtcDateTime,
+    ) -> Result<Self, ValidationError> {
+        validate_optional_finite("value", value)?;
+
+        Ok(Self {
+            label: label.into(),
+            value,
+            fiscal_year,
+            fiscal_quarter,
+            end_date,
+        })
+    }
+}
+
+/// Financial statement data for a symbol.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FinancialStatement {
+    pub symbol: Symbol,
+    pub statement_type: StatementType,
+    pub period: FinancialPeriod,
+    pub currency: String,
+    pub as_of: UtcDateTime,
+    pub line_items: Vec<FinancialLineItem>,
+}
+
+impl FinancialStatement {
+    pub fn new(
+        symbol: Symbol,
+        statement_type: StatementType,
+        period: FinancialPeriod,
+        currency: impl AsRef<str>,
+        as_of: UtcDateTime,
+        line_items: Vec<FinancialLineItem>,
+    ) -> Result<Self, ValidationError> {
+        Ok(Self {
+            symbol,
+            statement_type,
+            period,
+            currency: validate_currency_code(currency.as_ref())?,
+            as_of,
+            line_items,
+        })
+    }
+}
+
+/// Single earnings entry for a fiscal period.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EarningsEntry {
+    pub fiscal_year: i32,
+    pub fiscal_quarter: Option<i32>,
+    pub end_date: UtcDateTime,
+    pub eps_actual: Option<f64>,
+    pub eps_estimate: Option<f64>,
+    pub revenue_actual: Option<f64>,
+    pub revenue_estimate: Option<f64>,
+    pub surprise_percent: Option<f64>,
+}
+
+impl EarningsEntry {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        fiscal_year: i32,
+        fiscal_quarter: Option<i32>,
+        end_date: UtcDateTime,
+        eps_actual: Option<f64>,
+        eps_estimate: Option<f64>,
+        revenue_actual: Option<f64>,
+        revenue_estimate: Option<f64>,
+        surprise_percent: Option<f64>,
+    ) -> Result<Self, ValidationError> {
+        validate_optional_finite("eps_actual", eps_actual)?;
+        validate_optional_finite("eps_estimate", eps_estimate)?;
+        validate_optional_finite("revenue_actual", revenue_actual)?;
+        validate_optional_finite("revenue_estimate", revenue_estimate)?;
+        validate_optional_finite("surprise_percent", surprise_percent)?;
+
+        Ok(Self {
+            fiscal_year,
+            fiscal_quarter,
+            end_date,
+            eps_actual,
+            eps_estimate,
+            revenue_actual,
+            revenue_estimate,
+            surprise_percent,
+        })
+    }
+}
+
+/// Earnings report for a symbol.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EarningsReport {
+    pub symbol: Symbol,
+    pub currency: String,
+    pub as_of: UtcDateTime,
+    pub entries: Vec<EarningsEntry>,
+}
+
+impl EarningsReport {
+    pub fn new(
+        symbol: Symbol,
+        currency: impl AsRef<str>,
+        as_of: UtcDateTime,
+        entries: Vec<EarningsEntry>,
+    ) -> Result<Self, ValidationError> {
+        Ok(Self {
+            symbol,
+            currency: validate_currency_code(currency.as_ref())?,
+            as_of,
+            entries,
+        })
+    }
+}
+
 /// Canonical corporate action type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

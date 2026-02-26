@@ -222,7 +222,7 @@ impl DataSource for AlpacaAdapter {
     }
 
     fn capabilities(&self) -> CapabilitySet {
-        CapabilitySet::new(true, true, false, false)
+        CapabilitySet::new(true, true, false, false, false, false)
     }
 
     fn quote<'a>(
@@ -272,6 +272,24 @@ impl DataSource for AlpacaAdapter {
         Box::pin(async move {
             let _ = req;
             Err(SourceError::unsupported_endpoint(Endpoint::Search))
+        })
+    }
+
+    fn financials<'a>(
+        &'a self,
+        _req: crate::data_source::FinancialsRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<crate::data_source::FinancialsBatch, SourceError>> + Send + 'a>> {
+        Box::pin(async move {
+            Err(SourceError::unsupported_endpoint(crate::data_source::Endpoint::Financials))
+        })
+    }
+
+    fn earnings<'a>(
+        &'a self,
+        _req: crate::data_source::EarningsRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<crate::data_source::EarningsBatch, SourceError>> + Send + 'a>> {
+        Box::pin(async move {
+            Err(SourceError::unsupported_endpoint(crate::data_source::Endpoint::Earnings))
         })
     }
 

@@ -61,7 +61,8 @@ mod timestamp;
 pub use interval::Interval;
 pub use models::{
     validate_currency_code, AssetClass, Bar, BarSeries, CorporateAction, CorporateActionType,
-    Fundamental, Instrument, Quote,
+    EarningsEntry, EarningsReport, FinancialLineItem, FinancialPeriod, FinancialStatement,
+    Fundamental, Instrument, Quote, StatementType,
 };
 pub use symbol::Symbol;
 pub use timestamp::UtcDateTime;

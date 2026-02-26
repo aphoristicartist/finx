@@ -393,6 +393,24 @@ impl DataSource for AlphaVantageAdapter {
         })
     }
 
+    fn financials<'a>(
+        &'a self,
+        _req: crate::data_source::FinancialsRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<crate::data_source::FinancialsBatch, SourceError>> + Send + 'a>> {
+        Box::pin(async move {
+            Err(SourceError::unsupported_endpoint(crate::data_source::Endpoint::Financials))
+        })
+    }
+
+    fn earnings<'a>(
+        &'a self,
+        _req: crate::data_source::EarningsRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<crate::data_source::EarningsBatch, SourceError>> + Send + 'a>> {
+        Box::pin(async move {
+            Err(SourceError::unsupported_endpoint(crate::data_source::Endpoint::Earnings))
+        })
+    }
+
     fn health<'a>(&'a self) -> Pin<Box<dyn Future<Output = HealthStatus> + Send + 'a>> {
         Box::pin(async move {
             let circuit_state = self.circuit_breaker.state();
