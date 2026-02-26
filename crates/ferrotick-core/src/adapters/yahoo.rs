@@ -325,6 +325,36 @@ impl DataSource for YahooAdapter {
         })
     }
 
+    fn financials<'a>(
+        &'a self,
+        req: crate::data_source::FinancialsRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<crate::data_source::FinancialsBatch, SourceError>> + Send + 'a>> {
+        Box::pin(async move {
+            if req.limit == 0 {
+                return Err(SourceError::invalid_request(
+                    "yahoo financials limit must be greater than zero",
+                ));
+            }
+
+            self.fetch_real_financials(&req).await
+        })
+    }
+
+    fn earnings<'a>(
+        &'a self,
+        req: crate::data_source::EarningsRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<crate::data_source::EarningsBatch, SourceError>> + Send + 'a>> {
+        Box::pin(async move {
+            if req.limit == 0 {
+                return Err(SourceError::invalid_request(
+                    "yahoo earnings limit must be greater than zero",
+                ));
+            }
+
+            self.fetch_real_earnings(&req).await
+        })
+    }
+
     fn health<'a>(&'a self) -> Pin<Box<dyn Future<Output = HealthStatus> + Send + 'a>> {
         Box::pin(async move {
             let circuit_state = self.circuit_breaker.state();
@@ -873,6 +903,375 @@ impl YahooAdapter {
             results,
         })
     }
+
+    async fn fetch_real_financials(
+        &self,
+        req: &crate::data_source::FinancialsRequest,
+    ) -> Result<crate::data_source::FinancialsBatch, SourceError> {
+        let crumb = self.auth_manager.get_crumb(&self.http_client).await?;
+
+        // Map statement type to Yahoo modules
+        let modules = match req.statement_type {
+            crate::StatementType::Income => "incomeStatementHistory,incomeStatementHistoryQuarterly",
+            crate::StatementType::Balance => "balanceSheetHistory,balanceSheetHistoryQuarterly",
+            crate::StatementType::CashFlow => "cashflowStatementHistory,cashflowStatementHistoryQuarterly",
+        };
+
+        let endpoint = format!(
+            "https://query1.finance.yahoo.com/v10/finance/quoteSummary/{}?modules={}&crumb={}",
+            urlencoding::encode(req.symbol.as_str()),
+            modules,
+            urlencoding::encode(&crumb)
+        );
+
+        let response = self.execute_financials_request(&endpoint).await?;
+
+        let summary_response: YahooFinancialsResponse = serde_json::from_str(&response.body)
+            .map_err(|e| SourceError::internal(format!("failed to parse financials: {}", e)))?;
+
+        if let Some(error) = &summary_response.quote_summary.error {
+            if !error.is_empty() {
+                return Err(SourceError::unavailable(format!(
+                    "yahoo financials API error: {}",
+                    error
+                )));
+            }
+        }
+
+        let result = summary_response
+            .quote_summary
+            .result
+            .first()
+            .ok_or_else(|| SourceError::internal("no result in financials response"))?;
+
+        let as_of = UtcDateTime::now();
+        let mut line_items = Vec::new();
+
+        // Parse based on statement type
+        match req.statement_type {
+            crate::StatementType::Income => {
+                let history = if matches!(req.period, crate::FinancialPeriod::Annual) {
+                    result.income_statement_history.as_ref().map(|h| &h.income_statement_history)
+                } else {
+                    result.income_statement_history_quarterly.as_ref().map(|h| &h.income_statement_history)
+                };
+
+                if let Some(history) = history {
+                    for entry in history.iter().take(req.limit) {
+                        let end_date = entry.end_date.fmt.as_str();
+                        let ts = UtcDateTime::parse(end_date).unwrap_or(as_of);
+
+                        if let Some(rev) = &entry.total_revenue {
+                            if let Ok(item) = crate::FinancialLineItem::new(
+                                "Total Revenue",
+                                rev.to_option(),
+                                None,
+                                None,
+                                ts,
+                            ) {
+                                line_items.push(item);
+                            }
+                        }
+                        if let Some(gross) = &entry.gross_profit {
+                            if let Ok(item) = crate::FinancialLineItem::new(
+                                "Gross Profit",
+                                gross.to_option(),
+                                None,
+                                None,
+                                ts,
+                            ) {
+                                line_items.push(item);
+                            }
+                        }
+                        if let Some(net) = &entry.net_income {
+                            if let Ok(item) = crate::FinancialLineItem::new(
+                                "Net Income",
+                                net.to_option(),
+                                None,
+                                None,
+                                ts,
+                            ) {
+                                line_items.push(item);
+                            }
+                        }
+                        if let Some(eps) = &entry.basic_eps {
+                            if let Ok(item) = crate::FinancialLineItem::new(
+                                "Basic EPS",
+                                eps.to_option(),
+                                None,
+                                None,
+                                ts,
+                            ) {
+                                line_items.push(item);
+                            }
+                        }
+                    }
+                }
+            }
+            crate::StatementType::Balance => {
+                let history = if matches!(req.period, crate::FinancialPeriod::Annual) {
+                    result.balance_sheet_history.as_ref().map(|h| &h.balance_sheet_history)
+                } else {
+                    result.balance_sheet_history_quarterly.as_ref().map(|h| &h.balance_sheet_history)
+                };
+
+                if let Some(history) = history {
+                    for entry in history.iter().take(req.limit) {
+                        let end_date = entry.end_date.fmt.as_str();
+                        let ts = UtcDateTime::parse(end_date).unwrap_or(as_of);
+
+                        if let Some(assets) = &entry.total_assets {
+                            if let Ok(item) = crate::FinancialLineItem::new(
+                                "Total Assets",
+                                assets.to_option(),
+                                None,
+                                None,
+                                ts,
+                            ) {
+                                line_items.push(item);
+                            }
+                        }
+                        if let Some(liab) = &entry.total_liabilities_net_minority_interest {
+                            if let Ok(item) = crate::FinancialLineItem::new(
+                                "Total Liabilities",
+                                liab.to_option(),
+                                None,
+                                None,
+                                ts,
+                            ) {
+                                line_items.push(item);
+                            }
+                        }
+                        if let Some(equity) = &entry.total_stockholder_equity {
+                            if let Ok(item) = crate::FinancialLineItem::new(
+                                "Total Stockholder Equity",
+                                equity.to_option(),
+                                None,
+                                None,
+                                ts,
+                            ) {
+                                line_items.push(item);
+                            }
+                        }
+                        if let Some(cash) = &entry.cash {
+                            if let Ok(item) = crate::FinancialLineItem::new(
+                                "Cash",
+                                cash.to_option(),
+                                None,
+                                None,
+                                ts,
+                            ) {
+                                line_items.push(item);
+                            }
+                        }
+                    }
+                }
+            }
+            crate::StatementType::CashFlow => {
+                let history = if matches!(req.period, crate::FinancialPeriod::Annual) {
+                    result.cashflow_statement_history.as_ref().map(|h| &h.cashflow_statement_history)
+                } else {
+                    result.cashflow_statement_history_quarterly.as_ref().map(|h| &h.cashflow_statement_history)
+                };
+
+                if let Some(history) = history {
+                    for entry in history.iter().take(req.limit) {
+                        let end_date = entry.end_date.fmt.as_str();
+                        let ts = UtcDateTime::parse(end_date).unwrap_or(as_of);
+
+                        if let Some(ocf) = &entry.total_cash_from_operating_activities {
+                            if let Ok(item) = crate::FinancialLineItem::new(
+                                "Operating Cash Flow",
+                                ocf.to_option(),
+                                None,
+                                None,
+                                ts,
+                            ) {
+                                line_items.push(item);
+                            }
+                        }
+                        if let Some(icf) = &entry.total_cashflows_from_investing_activities {
+                            if let Ok(item) = crate::FinancialLineItem::new(
+                                "Investing Cash Flow",
+                                icf.to_option(),
+                                None,
+                                None,
+                                ts,
+                            ) {
+                                line_items.push(item);
+                            }
+                        }
+                        if let Some(fcf) = &entry.total_cash_from_financing_activities {
+                            if let Ok(item) = crate::FinancialLineItem::new(
+                                "Financing Cash Flow",
+                                fcf.to_option(),
+                                None,
+                                None,
+                                ts,
+                            ) {
+                                line_items.push(item);
+                            }
+                        }
+                        if let Some(capex) = &entry.capital_expenditures {
+                            if let Ok(item) = crate::FinancialLineItem::new(
+                                "Capital Expenditures",
+                                capex.to_option(),
+                                None,
+                                None,
+                                ts,
+                            ) {
+                                line_items.push(item);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let statement = crate::FinancialStatement::new(
+            req.symbol.clone(),
+            req.statement_type,
+            req.period,
+            "USD",
+            as_of,
+            line_items,
+        ).map_err(validation_to_error)?;
+
+        Ok(crate::data_source::FinancialsBatch {
+            financials: vec![statement],
+        })
+    }
+
+    async fn execute_financials_request(&self, endpoint: &str) -> Result<HttpResponse, SourceError> {
+        if !self.circuit_breaker.allow_request() {
+            return Err(SourceError::unavailable("yahoo circuit breaker is open"));
+        }
+
+        let request = HttpRequest::get(endpoint)
+            .with_header("referer", "https://finance.yahoo.com/")
+            .with_timeout_ms(10_000);
+
+        let response = self.http_client.execute(request).await.map_err(|e| {
+            self.circuit_breaker.record_failure();
+            SourceError::unavailable(format!("yahoo transport error: {}", e.message()))
+        })?;
+
+        let response = if response.status == 401 || response.status == 429 {
+            self.handle_auth_error();
+            let _ = self.auth_manager.get_crumb(&self.http_client).await;
+            let crumb = self.auth_manager.get_crumb(&self.http_client).await?;
+
+            let base_endpoint = endpoint.split("&crumb=").next().unwrap_or(endpoint);
+            let new_endpoint = format!("{}&crumb={}",
+                base_endpoint.split('&').take_while(|s| !s.starts_with("crumb=")).collect::<Vec<_>>().join("&"),
+                urlencoding::encode(&crumb)
+            );
+
+            let retry_request = HttpRequest::get(&new_endpoint)
+                .with_header("referer", "https://finance.yahoo.com/")
+                .with_timeout_ms(10_000);
+
+            self.http_client.execute(retry_request).await.map_err(|e| {
+                self.circuit_breaker.record_failure();
+                SourceError::unavailable(format!("yahoo transport error on retry: {}", e.message()))
+            })?
+        } else {
+            response
+        };
+
+        if !response.is_success() {
+            self.circuit_breaker.record_failure();
+            return Err(SourceError::unavailable(format!(
+                "yahoo returned status {}",
+                response.status
+            )));
+        }
+
+        self.circuit_breaker.record_success();
+        Ok(response)
+    }
+
+    async fn fetch_real_earnings(
+        &self,
+        req: &crate::data_source::EarningsRequest,
+    ) -> Result<crate::data_source::EarningsBatch, SourceError> {
+        let crumb = self.auth_manager.get_crumb(&self.http_client).await?;
+
+        let endpoint = format!(
+            "https://query1.finance.yahoo.com/v10/finance/quoteSummary/{}?modules=earnings,earningsTrend&crumb={}",
+            urlencoding::encode(req.symbol.as_str()),
+            urlencoding::encode(&crumb)
+        );
+
+        let response = self.execute_financials_request(&endpoint).await?;
+
+        let summary_response: YahooEarningsResponse = serde_json::from_str(&response.body)
+            .map_err(|e| SourceError::internal(format!("failed to parse earnings: {}", e)))?;
+
+        if let Some(error) = &summary_response.quote_summary.error {
+            if !error.is_empty() {
+                return Err(SourceError::unavailable(format!(
+                    "yahoo earnings API error: {}",
+                    error
+                )));
+            }
+        }
+
+        let result = summary_response
+            .quote_summary
+            .result
+            .first()
+            .ok_or_else(|| SourceError::internal("no result in earnings response"))?;
+
+        let as_of = UtcDateTime::now();
+        let mut entries = Vec::new();
+
+        // Parse earnings history
+        if let Some(earnings) = &result.earnings {
+            if let Some(history) = &earnings.financials_chart {
+                for (i, quarter) in history.quarterly.iter().enumerate().take(req.limit) {
+                    let end_date = quarter.date.as_str();
+                    let ts = UtcDateTime::parse(end_date).unwrap_or(as_of);
+
+                    // Extract fiscal year/quarter from date or use index
+                    let fiscal_year = quarter.year.unwrap_or(as_of.year());
+                    let fiscal_quarter = Some(quarter.quarter.unwrap_or(((i % 4) + 1) as i32));
+
+                    let surprise_percent = if let (Some(actual), Some(estimate)) = (quarter.actual, quarter.estimate) {
+                        if estimate != 0.0 {
+                            Some(((actual - estimate) / estimate.abs()) * 100.0)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    if let Ok(entry) = crate::EarningsEntry::new(
+                        fiscal_year,
+                        fiscal_quarter,
+                        ts,
+                        quarter.actual,
+                        quarter.estimate,
+                        None, // revenue not available in this structure
+                        None,
+                        surprise_percent,
+                    ) {
+                        entries.push(entry);
+                    }
+                }
+            }
+        }
+
+        let report = crate::EarningsReport::new(
+            req.symbol.clone(),
+            "USD",
+            as_of,
+            entries,
+        ).map_err(validation_to_error)?;
+
+        Ok(crate::data_source::EarningsBatch { earnings: report })
+    }
 }
 
 // Yahoo Finance API response structures
@@ -1028,6 +1427,148 @@ impl YahooRawValue {
     fn to_option(&self) -> Option<f64> {
         self.raw.filter(|v| !v.is_nan() && *v != 0.0)
     }
+}
+
+// Financials response structures
+#[derive(Debug, Clone, Deserialize)]
+struct YahooFinancialsResponse {
+    #[serde(rename = "quoteSummary")]
+    quote_summary: YahooFinancialsSummaryData,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooFinancialsSummaryData {
+    result: Vec<YahooFinancialsResult>,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooFinancialsResult {
+    #[serde(rename = "incomeStatementHistory", default)]
+    income_statement_history: Option<YahooIncomeStatementHistoryWrapper>,
+    #[serde(rename = "incomeStatementHistoryQuarterly", default)]
+    income_statement_history_quarterly: Option<YahooIncomeStatementHistoryWrapper>,
+    #[serde(rename = "balanceSheetHistory", default)]
+    balance_sheet_history: Option<YahooBalanceSheetHistoryWrapper>,
+    #[serde(rename = "balanceSheetHistoryQuarterly", default)]
+    balance_sheet_history_quarterly: Option<YahooBalanceSheetHistoryWrapper>,
+    #[serde(rename = "cashflowStatementHistory", default)]
+    cashflow_statement_history: Option<YahooCashFlowHistoryWrapper>,
+    #[serde(rename = "cashflowStatementHistoryQuarterly", default)]
+    cashflow_statement_history_quarterly: Option<YahooCashFlowHistoryWrapper>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooIncomeStatementHistoryWrapper {
+    #[serde(rename = "incomeStatementHistory", default)]
+    income_statement_history: Vec<YahooIncomeStatement>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooBalanceSheetHistoryWrapper {
+    #[serde(rename = "balanceSheetHistory", default)]
+    balance_sheet_history: Vec<YahooBalanceSheet>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooCashFlowHistoryWrapper {
+    #[serde(rename = "cashflowStatementHistory", default)]
+    cashflow_statement_history: Vec<YahooCashFlow>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooIncomeStatement {
+    #[serde(rename = "endDate", default)]
+    end_date: YahooEndDate,
+    #[serde(rename = "totalRevenue", default)]
+    total_revenue: Option<YahooRawValue>,
+    #[serde(rename = "grossProfit", default)]
+    gross_profit: Option<YahooRawValue>,
+    #[serde(rename = "netIncome", default)]
+    net_income: Option<YahooRawValue>,
+    #[serde(rename = "basicEPS", default)]
+    basic_eps: Option<YahooRawValue>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooBalanceSheet {
+    #[serde(rename = "endDate", default)]
+    end_date: YahooEndDate,
+    #[serde(rename = "totalAssets", default)]
+    total_assets: Option<YahooRawValue>,
+    #[serde(rename = "totalLiab", default)]
+    total_liabilities_net_minority_interest: Option<YahooRawValue>,
+    #[serde(rename = "totalStockholderEquity", default)]
+    total_stockholder_equity: Option<YahooRawValue>,
+    #[serde(rename = "cash", default)]
+    cash: Option<YahooRawValue>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooCashFlow {
+    #[serde(rename = "endDate", default)]
+    end_date: YahooEndDate,
+    #[serde(rename = "totalCashFromOperatingActivities", default)]
+    total_cash_from_operating_activities: Option<YahooRawValue>,
+    #[serde(rename = "totalCashflowsFromInvestingActivities", default)]
+    total_cashflows_from_investing_activities: Option<YahooRawValue>,
+    #[serde(rename = "totalCashFromFinancingActivities", default)]
+    total_cash_from_financing_activities: Option<YahooRawValue>,
+    #[serde(rename = "capitalExpenditures", default)]
+    capital_expenditures: Option<YahooRawValue>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct YahooEndDate {
+    #[serde(default)]
+    fmt: String,
+}
+
+// Earnings response structures
+#[derive(Debug, Clone, Deserialize)]
+struct YahooEarningsResponse {
+    #[serde(rename = "quoteSummary")]
+    quote_summary: YahooEarningsSummaryData,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooEarningsSummaryData {
+    result: Vec<YahooEarningsResult>,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooEarningsResult {
+    #[serde(rename = "earnings", default)]
+    earnings: Option<YahooEarningsData>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooEarningsData {
+    #[serde(rename = "financialsChart", default)]
+    financials_chart: Option<YahooFinancialsChart>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooFinancialsChart {
+    #[serde(default)]
+    quarterly: Vec<YahooEarningsQuarter>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct YahooEarningsQuarter {
+    #[serde(default)]
+    date: String,
+    #[serde(default)]
+    actual: Option<f64>,
+    #[serde(default)]
+    estimate: Option<f64>,
+    #[serde(default)]
+    year: Option<i32>,
+    #[serde(default)]
+    quarter: Option<i32>,
 }
 
 fn validation_to_error(error: ValidationError) -> SourceError {

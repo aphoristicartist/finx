@@ -195,6 +195,27 @@ pub enum Command {
     ///   ferrotick search microsoft --limit 5
     Search(SearchArgs),
 
+    /// 📊 Fetch financial statements.
+    ///
+    /// Returns income statement, balance sheet, or cash flow data
+    /// for a symbol.
+    ///
+    /// # Examples
+    ///
+    ///   ferrotick financials AAPL --statement income --period annual
+    ///   ferrotick financials MSFT --statement balance --period quarterly
+    Financials(FinancialsArgs),
+
+    /// 💵 Fetch earnings data.
+    ///
+    /// Returns quarterly earnings history including EPS actual vs estimate.
+    ///
+    /// # Examples
+    ///
+    ///   ferrotick earnings AAPL
+    ///   ferrotick earnings MSFT --limit 8
+    Earnings(EarningsArgs),
+
     /// 🗄️ Run SQL queries against the DuckDB warehouse.
     ///
     /// Execute SQL queries against the local warehouse database.
@@ -277,6 +298,41 @@ pub struct SearchArgs {
 
     /// Maximum number of results to return.
     #[arg(long, default_value_t = 20)]
+    pub limit: usize,
+}
+
+/// Arguments for the `financials` command.
+#[derive(Debug, Args)]
+pub struct FinancialsArgs {
+    /// Market symbol to fetch financials for.
+    pub symbol: String,
+
+    /// Financial statement type.
+    ///
+    /// Supported types:
+    /// - income: Income statement
+    /// - balance: Balance sheet
+    /// - cashflow: Cash flow statement
+    #[arg(long, default_value = "income")]
+    pub statement: String,
+
+    /// Period type (annual, quarterly).
+    #[arg(long, default_value = "annual")]
+    pub period: String,
+
+    /// Number of periods to return (default: 4).
+    #[arg(long, default_value_t = 4)]
+    pub limit: usize,
+}
+
+/// Arguments for the `earnings` command.
+#[derive(Debug, Args)]
+pub struct EarningsArgs {
+    /// Market symbol to fetch earnings for.
+    pub symbol: String,
+
+    /// Number of quarters to return (default: 8).
+    #[arg(long, default_value_t = 8)]
     pub limit: usize,
 }
 

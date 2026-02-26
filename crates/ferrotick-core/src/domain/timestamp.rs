@@ -60,6 +60,11 @@ impl UtcDateTime {
             .format(&Rfc3339)
             .expect("UtcDateTime must be RFC3339 formattable")
     }
+
+    /// Returns the year of this timestamp.
+    pub fn year(&self) -> i32 {
+        self.0.year()
+    }
 }
 
 impl Display for UtcDateTime {

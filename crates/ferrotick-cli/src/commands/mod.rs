@@ -1,7 +1,9 @@
 mod bars;
 mod cache;
 mod cache_load;
+mod earnings;
 mod export;
+mod financials;
 mod fundamentals;
 mod quote;
 mod schema;
@@ -75,6 +77,8 @@ pub async fn run(cli: &Cli) -> Result<Envelope<Value>, CliError> {
         Command::Bars(args) => bars::run(args, &router, &strategy).await?,
         Command::Fundamentals(args) => fundamentals::run(args, &router, &strategy).await?,
         Command::Search(args) => search::run(args, &router, &strategy).await?,
+        Command::Financials(args) => financials::run(args, &router, &strategy).await?,
+        Command::Earnings(args) => earnings::run(args, &router, &strategy).await?,
         Command::Sql(args) => sql::run(
             args,
             cli.explain,

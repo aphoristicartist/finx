@@ -333,6 +333,30 @@ impl SourceRouter {
         .await
     }
 
+    pub async fn route_financials(
+        &self,
+        req: &crate::data_source::FinancialsRequest,
+        strategy: SourceStrategy,
+    ) -> RouteResult<crate::data_source::FinancialsBatch> {
+        let req = req.clone();
+        self.route_endpoint(Endpoint::Financials, strategy, move |source| {
+            source.financials(req.clone())
+        })
+        .await
+    }
+
+    pub async fn route_earnings(
+        &self,
+        req: &crate::data_source::EarningsRequest,
+        strategy: SourceStrategy,
+    ) -> RouteResult<crate::data_source::EarningsBatch> {
+        let req = req.clone();
+        self.route_endpoint(Endpoint::Earnings, strategy, move |source| {
+            source.earnings(req.clone())
+        })
+        .await
+    }
+
     async fn route_endpoint<T, F>(
         &self,
         endpoint: Endpoint,

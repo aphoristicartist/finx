@@ -46,6 +46,8 @@ pub enum Endpoint {
     Bars,
     Fundamentals,
     Search,
+    Financials,
+    Earnings,
 }
 
 impl Endpoint {
@@ -55,6 +57,8 @@ impl Endpoint {
             Self::Bars => "bars",
             Self::Fundamentals => "fundamentals",
             Self::Search => "search",
+            Self::Financials => "financials",
+            Self::Earnings => "earnings",
         }
     }
 }
@@ -72,20 +76,24 @@ pub struct CapabilitySet {
     pub bars: bool,
     pub fundamentals: bool,
     pub search: bool,
+    pub financials: bool,
+    pub earnings: bool,
 }
 
 impl CapabilitySet {
-    pub const fn new(quote: bool, bars: bool, fundamentals: bool, search: bool) -> Self {
+    pub const fn new(quote: bool, bars: bool, fundamentals: bool, search: bool, financials: bool, earnings: bool) -> Self {
         Self {
             quote,
             bars,
             fundamentals,
             search,
+            financials,
+            earnings,
         }
     }
 
     pub const fn full() -> Self {
-        Self::new(true, true, true, true)
+        Self::new(true, true, true, true, true, true)
     }
 
     pub const fn supports(self, endpoint: Endpoint) -> bool {
@@ -94,11 +102,13 @@ impl CapabilitySet {
             Endpoint::Bars => self.bars,
             Endpoint::Fundamentals => self.fundamentals,
             Endpoint::Search => self.search,
+            Endpoint::Financials => self.financials,
+            Endpoint::Earnings => self.earnings,
         }
     }
 
     pub fn supported_endpoints(self) -> Vec<&'static str> {
-        let mut values = Vec::with_capacity(4);
+        let mut values = Vec::with_capacity(6);
         if self.quote {
             values.push("quote");
         }
@@ -110,6 +120,12 @@ impl CapabilitySet {
         }
         if self.search {
             values.push("search");
+        }
+        if self.financials {
+            values.push("financials");
+        }
+        if self.earnings {
+            values.push("earnings");
         }
         values
     }
@@ -351,6 +367,66 @@ pub struct SearchBatch {
     pub results: Vec<Instrument>,
 }
 
+/// Request payload for financials endpoints.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FinancialsRequest {
+    pub symbol: Symbol,
+    pub statement_type: crate::StatementType,
+    pub period: crate::FinancialPeriod,
+    pub limit: usize,
+}
+
+impl FinancialsRequest {
+    pub fn new(
+        symbol: Symbol,
+        statement_type: crate::StatementType,
+        period: crate::FinancialPeriod,
+        limit: usize,
+    ) -> Result<Self, SourceError> {
+        if limit == 0 {
+            return Err(SourceError::invalid_request(
+                "financials request limit must be greater than zero",
+            ));
+        }
+        Ok(Self {
+            symbol,
+            statement_type,
+            period,
+            limit,
+        })
+    }
+}
+
+/// Request payload for earnings endpoints.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EarningsRequest {
+    pub symbol: Symbol,
+    pub limit: usize,
+}
+
+impl EarningsRequest {
+    pub fn new(symbol: Symbol, limit: usize) -> Result<Self, SourceError> {
+        if limit == 0 {
+            return Err(SourceError::invalid_request(
+                "earnings request limit must be greater than zero",
+            ));
+        }
+        Ok(Self { symbol, limit })
+    }
+}
+
+/// Normalized financials batch.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FinancialsBatch {
+    pub financials: Vec<crate::FinancialStatement>,
+}
+
+/// Normalized earnings batch.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EarningsBatch {
+    pub earnings: crate::EarningsReport,
+}
+
 /// Source adapter contract.
 ///
 /// All data providers must implement this trait to be used with the router.
@@ -452,6 +528,32 @@ pub trait DataSource: Send + Sync {
         &'a self,
         req: SearchRequest,
     ) -> Pin<Box<dyn Future<Output = Result<SearchBatch, SourceError>> + Send + 'a>>;
+    
+    /// Fetches financial statements.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SourceError`] if:
+    /// - The endpoint is not supported
+    /// - Invalid symbol or limit is provided
+    /// - The provider is unavailable
+    fn financials<'a>(
+        &'a self,
+        req: FinancialsRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<FinancialsBatch, SourceError>> + Send + 'a>>;
+    
+    /// Fetches earnings data.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SourceError`] if:
+    /// - The endpoint is not supported
+    /// - Invalid symbol or limit is provided
+    /// - The provider is unavailable
+    fn earnings<'a>(
+        &'a self,
+        req: EarningsRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<EarningsBatch, SourceError>> + Send + 'a>>;
     
     /// Returns the current health status of this source.
     ///

@@ -139,15 +139,17 @@ pub use cache::{CacheMode, CacheStore};
 
 // Data source trait and types
 pub use data_source::{
-    BarsRequest, CapabilitySet, DataSource, Endpoint, FundamentalsBatch, FundamentalsRequest,
-    HealthState, HealthStatus, QuoteBatch, QuoteRequest, SearchBatch, SearchRequest, SourceError,
+    BarsRequest, CapabilitySet, DataSource, EarningsBatch, EarningsRequest, Endpoint,
+    FinancialsBatch, FinancialsRequest, FundamentalsBatch, FundamentalsRequest, HealthState,
+    HealthStatus, QuoteBatch, QuoteRequest, SearchBatch, SearchRequest, SourceError,
     SourceErrorKind,
 };
 
 // Domain models
 pub use domain::{
-    AssetClass, Bar, BarSeries, CorporateAction, CorporateActionType, Fundamental, Instrument,
-    Interval, Quote, Symbol, UtcDateTime,
+    AssetClass, Bar, BarSeries, CorporateAction, CorporateActionType, EarningsEntry,
+    EarningsReport, FinancialLineItem, FinancialPeriod, FinancialStatement, Fundamental,
+    Instrument, Interval, Quote, StatementType, Symbol, UtcDateTime,
 };
 
 // Envelope types
