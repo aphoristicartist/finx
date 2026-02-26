@@ -138,6 +138,12 @@ ferrotick quote AAPL
 # Get daily bars for the last 30 days
 ferrotick bars AAPL --interval 1d --limit 30
 
+# Get annual income statement
+ferrotick financials AAPL --statement income --period annual
+
+# Get recent earnings data
+ferrotick earnings AAPL --limit 4
+
 # Search for instruments
 ferrotick search apple --limit 10
 
@@ -223,6 +229,39 @@ ferrotick search apple
 ferrotick search microsoft --limit 5
 ```
 
+### Fetch Financial Statements
+
+Get income statements, balance sheets, and cash flow statements:
+
+```bash
+# Annual income statement
+ferrotick financials AAPL --statement income --period annual
+
+# Quarterly balance sheet
+ferrotick financials MSFT --statement balance --period quarterly
+
+# Cash flow statement
+ferrotick financials GOOGL --statement cashflow --period annual
+
+# Available statements: income, balance, cashflow
+# Available periods: annual, quarterly
+```
+
+### Get Earnings Data
+
+Fetch earnings history including EPS actual vs estimate:
+
+```bash
+# Get recent earnings for a symbol
+ferrotick earnings AAPL
+
+# Limit the number of quarters
+ferrotick earnings MSFT --limit 4
+
+# Pretty-printed output
+ferrotick earnings GOOGL --pretty
+```
+
 ### Query Warehouse
 
 Run SQL queries against the local DuckDB warehouse:
@@ -291,12 +330,12 @@ ferrotick schema get envelope
 
 ## 📊 Capability Matrix
 
-| Provider | Quote | Bars | Fundamentals | Search | Priority Score |
-|----------|:-----:|:----:|:------------:|:------:|:--------------:|
-| **Polygon** | ✅ | ✅ | ✅ | ✅ | 90 |
-| **Alpaca** | ✅ | ✅ | ❌ | ❌ | 85 |
-| **Yahoo Finance** | ✅ | ✅ | ✅ | ✅ | 78 |
-| **Alpha Vantage** | ✅ | ✅ | ✅ | ✅ | 70 |
+| Provider | Quote | Bars | Fundamentals | Financials | Earnings | Search | Priority Score |
+|----------|:-----:|:----:|:------------:|:----------:|:--------:|:------:|:--------------:|
+| **Polygon** | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | 90 |
+| **Alpaca** | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | 85 |
+| **Yahoo Finance** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 78 |
+| **Alpha Vantage** | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | 70 |
 
 The `--source auto` strategy uses priority scores for automatic source selection with fallback.
 
