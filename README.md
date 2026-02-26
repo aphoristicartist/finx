@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/nickelc/ferrotick/main/docs/logo.png" alt="Ferrotick Logo" width="200" onerror="this.style.display='none'">
-</p>
-
 <h1 align="center">🦀 Ferrotick</h1>
 
 <p align="center">
