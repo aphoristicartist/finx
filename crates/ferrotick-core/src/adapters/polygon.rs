@@ -3,20 +3,19 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use serde::Deserialize;
-use time::Duration;
 
 use crate::circuit_breaker::{CircuitBreaker, CircuitState};
 use crate::data_source::{
     BarsRequest, CapabilitySet, DataSource, FundamentalsBatch, FundamentalsRequest, HealthState,
     HealthStatus, QuoteBatch, QuoteRequest, SearchBatch, SearchRequest, SourceError,
 };
-use crate::http_client::{HttpAuth, HttpClient, HttpRequest, NoopHttpClient};
+use crate::http_client::{HttpAuth, HttpClient, HttpRequest};
 use crate::{
     AssetClass, Bar, BarSeries, Fundamental, Instrument, Interval, ProviderId, Quote, Symbol,
     UtcDateTime, ValidationError,
 };
 
-/// Polygon adapter supporting both real API calls and mock mode.
+/// Polygon adapter for real API calls.
 #[derive(Clone)]
 pub struct PolygonAdapter {
     health_state: HealthState,
@@ -25,56 +24,50 @@ pub struct PolygonAdapter {
     http_client: Arc<dyn HttpClient>,
     auth: HttpAuth,
     circuit_breaker: Arc<CircuitBreaker>,
-    use_real_api: bool,
 }
 
-impl Default for PolygonAdapter {
-    fn default() -> Self {
+impl PolygonAdapter {
+    /// Create a new PolygonAdapter with a real HTTP client and authentication.
+    pub fn with_http_client(http_client: Arc<dyn HttpClient>, auth: HttpAuth) -> Self {
         Self {
             health_state: HealthState::Healthy,
             rate_available: true,
             score: 90,
-            http_client: Arc::new(NoopHttpClient),
-            auth: HttpAuth::Header {
-                name: String::from("x-api-key"),
-                value: std::env::var("FERROTICK_POLYGON_API_KEY")
-                    .unwrap_or_else(|_| String::from("demo")),
-            },
+            http_client,
+            auth,
             circuit_breaker: Arc::new(CircuitBreaker::default()),
-            use_real_api: false,
         }
     }
-}
 
-impl PolygonAdapter {
-    pub fn with_health(health_state: HealthState, rate_available: bool) -> Self {
+    /// Create an adapter with custom health state (for testing).
+    pub fn with_health(health_state: HealthState, rate_available: bool, http_client: Arc<dyn HttpClient>, auth: HttpAuth) -> Self {
         Self {
             health_state,
             rate_available,
-            ..Self::default()
-        }
-    }
-
-    pub fn with_http_client(http_client: Arc<dyn HttpClient>, auth: HttpAuth) -> Self {
-        let is_real = !http_client.is_mock();
-        Self {
             http_client,
             auth,
-            use_real_api: is_real,
-            ..Self::default()
+            ..Self::with_http_client(Arc::new(crate::http_client::ReqwestHttpClient::new()), HttpAuth::None)
         }
     }
 
-    pub fn with_circuit_breaker(circuit_breaker: Arc<CircuitBreaker>) -> Self {
+    /// Create an adapter with a custom circuit breaker.
+    pub fn with_circuit_breaker(circuit_breaker: Arc<CircuitBreaker>, http_client: Arc<dyn HttpClient>, auth: HttpAuth) -> Self {
         Self {
             circuit_breaker,
-            ..Self::default()
+            http_client,
+            auth,
+            ..Self::with_http_client(Arc::new(crate::http_client::ReqwestHttpClient::new()), HttpAuth::None)
         }
     }
 
-    /// Check if we're using a real HTTP client
-    fn is_real_client(&self) -> bool {
-        self.use_real_api
+    /// Create a new PolygonAdapter with a custom circuit breaker for testing.
+    /// Uses default HTTP client and auth.
+    pub fn with_circuit_breaker_for_test(circuit_breaker: Arc<CircuitBreaker>) -> Self {
+        Self::with_circuit_breaker(
+            circuit_breaker,
+            Arc::new(crate::http_client::ReqwestHttpClient::new()),
+            HttpAuth::None,
+        )
     }
 }
 
@@ -313,130 +306,6 @@ impl PolygonAdapter {
     }
 }
 
-// Mock data methods (for tests)
-impl PolygonAdapter {
-    async fn execute_authenticated_call(&self, endpoint: &str) -> Result<(), SourceError> {
-        if !self.circuit_breaker.allow_request() {
-            return Err(SourceError::unavailable(
-                "polygon circuit breaker is open; skipping upstream call",
-            ));
-        }
-
-        let request = HttpRequest::get(endpoint).with_auth(&self.auth);
-        let response = self.http_client.execute(request).await.map_err(|error| {
-            self.circuit_breaker.record_failure();
-            if error.retryable() {
-                SourceError::unavailable(format!("polygon transport error: {}", error.message()))
-            } else {
-                SourceError::internal(format!("polygon transport error: {}", error.message()))
-            }
-        })?;
-
-        if !response.is_success() {
-            self.circuit_breaker.record_failure();
-            return Err(SourceError::unavailable(format!(
-                "polygon upstream returned status {}",
-                response.status
-            )));
-        }
-
-        self.circuit_breaker.record_success();
-        Ok(())
-    }
-
-    async fn fetch_mock_quotes(&self, req: &QuoteRequest) -> Result<QuoteBatch, SourceError> {
-        self.execute_authenticated_call("https://api.polygon.io/v2/last/trade")
-            .await?;
-
-        let as_of = UtcDateTime::now();
-        let quotes = req
-            .symbols
-            .iter()
-            .map(|symbol| {
-                let payload = PolygonQuotePayload::from_symbol(symbol, as_of);
-                normalize_quote(payload)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(QuoteBatch { quotes })
-    }
-
-    async fn fetch_mock_bars(&self, req: &BarsRequest) -> Result<BarSeries, SourceError> {
-        self.execute_authenticated_call("https://api.polygon.io/v2/aggs/ticker")
-            .await?;
-
-        let step = interval_duration(req.interval);
-        let now = UtcDateTime::now().into_inner();
-        let seed = symbol_seed(&req.symbol);
-        let mut bars = Vec::with_capacity(req.limit);
-
-        for index in 0..req.limit {
-            let offset = step * (req.limit.saturating_sub(index + 1) as i32);
-            let ts =
-                UtcDateTime::from_offset_datetime(now - offset).map_err(validation_to_error)?;
-            let base = 95.0 + ((seed + index as u64 * 3) % 420) as f64 / 10.0;
-
-            let raw = PolygonAggregatePayload {
-                ts,
-                open: base + 0.05,
-                high: base + 1.35,
-                low: base - 0.75,
-                close: base + 0.42,
-                volume: Some(35_000 + (index as u64) * 40),
-                vwap: Some(base + 0.20),
-            };
-
-            bars.push(normalize_bar(raw)?);
-        }
-
-        Ok(BarSeries::new(req.symbol.clone(), req.interval, bars))
-    }
-
-    async fn fetch_mock_fundamentals(
-        &self,
-        req: &FundamentalsRequest,
-    ) -> Result<FundamentalsBatch, SourceError> {
-        self.execute_authenticated_call("https://api.polygon.io/v3/reference/tickers")
-            .await?;
-
-        let as_of = UtcDateTime::now();
-        let fundamentals = req
-            .symbols
-            .iter()
-            .map(|symbol| {
-                let payload = PolygonTickerPayload::from_symbol(symbol, as_of);
-                normalize_fundamentals(payload)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(FundamentalsBatch { fundamentals })
-    }
-
-    async fn execute_mock_search(&self, req: &SearchRequest) -> Result<SearchBatch, SourceError> {
-        self.execute_authenticated_call("https://api.polygon.io/v3/reference/tickers")
-            .await?;
-
-        let query_lower = req.query.to_ascii_lowercase();
-        let results = polygon_catalog()
-            .into_iter()
-            .filter(|instrument| {
-                instrument
-                    .symbol
-                    .as_str()
-                    .to_ascii_lowercase()
-                    .contains(&query_lower)
-                    || instrument.name.to_ascii_lowercase().contains(&query_lower)
-            })
-            .take(req.limit)
-            .collect::<Vec<_>>();
-
-        Ok(SearchBatch {
-            query: req.query.clone(),
-            results,
-        })
-    }
-}
-
 impl DataSource for PolygonAdapter {
     fn id(&self) -> ProviderId {
         ProviderId::Polygon
@@ -462,11 +331,7 @@ impl DataSource for PolygonAdapter {
                 ));
             }
 
-            if self.is_real_client() {
-                self.fetch_real_quotes(&req).await
-            } else {
-                self.fetch_mock_quotes(&req).await
-            }
+            self.fetch_real_quotes(&req).await
         })
     }
 
@@ -486,11 +351,7 @@ impl DataSource for PolygonAdapter {
                 ));
             }
 
-            if self.is_real_client() {
-                self.fetch_real_bars(&req).await
-            } else {
-                self.fetch_mock_bars(&req).await
-            }
+            self.fetch_real_bars(&req).await
         })
     }
 
@@ -510,11 +371,7 @@ impl DataSource for PolygonAdapter {
                 ));
             }
 
-            if self.is_real_client() {
-                self.fetch_real_fundamentals(&req).await
-            } else {
-                self.fetch_mock_fundamentals(&req).await
-            }
+            self.fetch_real_fundamentals(&req).await
         })
     }
 
@@ -535,11 +392,7 @@ impl DataSource for PolygonAdapter {
                 ));
             }
 
-            if self.is_real_client() {
-                self.execute_real_search(&req).await
-            } else {
-                self.execute_mock_search(&req).await
-            }
+            self.execute_real_search(&req).await
         })
     }
 
@@ -628,160 +481,6 @@ struct PolygonTickerResult {
     currency_name: Option<String>,
 }
 
-// Mock data structures
-#[derive(Debug, Clone)]
-struct PolygonQuotePayload {
-    ticker: String,
-    last_trade_price: f64,
-    bid_price: f64,
-    ask_price: f64,
-    session_volume: u64,
-    currency: &'static str,
-    timestamp: UtcDateTime,
-}
-
-impl PolygonQuotePayload {
-    fn from_symbol(symbol: &Symbol, timestamp: UtcDateTime) -> Self {
-        let seed = symbol_seed(symbol);
-        let price = 93.5 + (seed % 540) as f64 / 10.0;
-        Self {
-            ticker: symbol.as_str().to_owned(),
-            last_trade_price: price,
-            bid_price: price - 0.06,
-            ask_price: price + 0.06,
-            session_volume: 65_000 + seed % 15_000,
-            currency: "USD",
-            timestamp,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct PolygonAggregatePayload {
-    ts: UtcDateTime,
-    open: f64,
-    high: f64,
-    low: f64,
-    close: f64,
-    volume: Option<u64>,
-    vwap: Option<f64>,
-}
-
-#[derive(Debug, Clone)]
-struct PolygonTickerPayload {
-    ticker: String,
-    as_of: UtcDateTime,
-    market_cap: Option<f64>,
-    pe_ratio: Option<f64>,
-    dividend_yield: Option<f64>,
-}
-
-impl PolygonTickerPayload {
-    fn from_symbol(symbol: &Symbol, as_of: UtcDateTime) -> Self {
-        let seed = symbol_seed(symbol);
-        Self {
-            ticker: symbol.as_str().to_owned(),
-            as_of,
-            market_cap: Some(700_000_000_000.0 + (seed % 250_000) as f64 * 1_000_000.0),
-            pe_ratio: Some(16.0 + (seed % 250) as f64 / 10.0),
-            dividend_yield: Some(0.004 + (seed % 40) as f64 / 10_000.0),
-        }
-    }
-}
-
-fn normalize_quote(payload: PolygonQuotePayload) -> Result<Quote, SourceError> {
-    let symbol = Symbol::parse(&payload.ticker).map_err(validation_to_error)?;
-    Quote::new(
-        symbol,
-        payload.last_trade_price,
-        Some(payload.bid_price),
-        Some(payload.ask_price),
-        Some(payload.session_volume),
-        payload.currency,
-        payload.timestamp,
-    )
-    .map_err(validation_to_error)
-}
-
-fn normalize_bar(payload: PolygonAggregatePayload) -> Result<Bar, SourceError> {
-    Bar::new(
-        payload.ts,
-        payload.open,
-        payload.high,
-        payload.low,
-        payload.close,
-        payload.volume,
-        payload.vwap,
-    )
-    .map_err(validation_to_error)
-}
-
-fn normalize_fundamentals(payload: PolygonTickerPayload) -> Result<Fundamental, SourceError> {
-    let symbol = Symbol::parse(&payload.ticker).map_err(validation_to_error)?;
-    Fundamental::new(
-        symbol,
-        payload.as_of,
-        payload.market_cap,
-        payload.pe_ratio,
-        payload.dividend_yield,
-    )
-    .map_err(validation_to_error)
-}
-
-fn polygon_catalog() -> Vec<Instrument> {
-    [
-        ("AAPL", "Apple Inc.", Some("NASDAQ"), AssetClass::Equity),
-        (
-            "MSFT",
-            "Microsoft Corporation",
-            Some("NASDAQ"),
-            AssetClass::Equity,
-        ),
-        (
-            "NVDA",
-            "NVIDIA Corporation",
-            Some("NASDAQ"),
-            AssetClass::Equity,
-        ),
-        ("TSLA", "Tesla, Inc.", Some("NASDAQ"), AssetClass::Equity),
-        (
-            "SPY",
-            "SPDR S&P 500 ETF Trust",
-            Some("ARCA"),
-            AssetClass::Etf,
-        ),
-    ]
-    .into_iter()
-    .map(|(symbol, name, exchange, asset_class)| {
-        Instrument::new(
-            Symbol::parse(symbol).expect("catalog symbols are valid"),
-            name,
-            exchange.map(str::to_owned),
-            "USD",
-            asset_class,
-            true,
-        )
-        .expect("catalog entries are valid")
-    })
-    .collect::<Vec<_>>()
-}
-
-fn symbol_seed(symbol: &Symbol) -> u64 {
-    symbol.as_str().bytes().fold(7_u64, |acc, byte| {
-        acc.wrapping_mul(37).wrapping_add(byte as u64)
-    })
-}
-
-fn interval_duration(interval: Interval) -> Duration {
-    match interval {
-        Interval::OneMinute => Duration::minutes(1),
-        Interval::FiveMinutes => Duration::minutes(5),
-        Interval::FifteenMinutes => Duration::minutes(15),
-        Interval::OneHour => Duration::hours(1),
-        Interval::OneDay => Duration::days(1),
-    }
-}
-
 fn validation_to_error(error: ValidationError) -> SourceError {
     SourceError::internal(error.to_string())
 }
@@ -801,11 +500,19 @@ mod tests {
     }
 
     impl RecordingHttpClient {
-        fn failure() -> Self {
+        fn with_response(response: Result<HttpResponse, HttpError>) -> Self {
             Self {
-                response: Err(HttpError::new("network error")),
+                response,
                 requests: Mutex::new(Vec::new()),
             }
+        }
+
+        fn success_json(json: &str) -> Self {
+            Self::with_response(Ok(HttpResponse::ok_json(json)))
+        }
+
+        fn failure() -> Self {
+            Self::with_response(Err(HttpError::new("network error")))
         }
     }
 
@@ -821,27 +528,6 @@ mod tests {
             let response = self.response.clone();
             Box::pin(async move { response })
         }
-
-        fn is_mock(&self) -> bool {
-            true
-        }
-    }
-
-    #[test]
-    fn quote_request_applies_api_key_header() {
-        let client = Arc::new(NoopHttpClient);
-        let adapter = PolygonAdapter::with_http_client(
-            client,
-            HttpAuth::Header {
-                name: String::from("X-API-Key"),
-                value: String::from("key-123"),
-            },
-        );
-        let request = QuoteRequest::new(vec![Symbol::parse("NVDA").expect("valid symbol")])
-            .expect("valid request");
-
-        let response = block_on(adapter.quote(request)).expect("quote should succeed");
-        assert_eq!(response.quotes.len(), 1);
     }
 
     #[test]

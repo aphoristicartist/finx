@@ -65,15 +65,9 @@ impl CommandResult {
 }
 
 pub async fn run(cli: &Cli) -> Result<Envelope<Value>, CliError> {
-    let router = if cli.mock {
-        SourceRouterBuilder::new()
-            .with_mock_mode()
-            .build()
-    } else {
-        SourceRouterBuilder::new()
-            .with_real_clients()
-            .build()
-    };
+    let router = SourceRouterBuilder::new()
+        .with_real_clients()
+        .build();
     let strategy = to_source_strategy(cli.source);
 
     let command_result = match &cli.command {

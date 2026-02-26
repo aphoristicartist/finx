@@ -164,8 +164,7 @@ pub use ferrotick_warehouse::{
 
 // HTTP client types
 pub use http_client::{
-    HttpAuth, HttpClient, HttpError, HttpMethod, HttpRequest, HttpResponse, NoopHttpClient,
-    ReqwestHttpClient,
+    HttpAuth, HttpClient, HttpError, HttpMethod, HttpRequest, HttpResponse, ReqwestHttpClient,
 };
 
 // Provider policies
