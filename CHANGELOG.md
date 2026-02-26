@@ -14,6 +14,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.0] - 2026-02-26
+
+### ✨ Added
+
+#### Financial Data Commands
+- **`financials` command** - Fetch financial statements (income, balance sheet, cash flow)
+  - Support for annual and quarterly periods
+  - Full line-item extraction with canonical aliases
+  - Automatic free cash flow calculation
+  - DuckDB warehouse integration with `financials` table
+- **`earnings` command** - Fetch earnings history and upcoming earnings dates
+  - EPS actual vs estimate comparison
+  - Surprise percentage calculation
+  - Support for up to 8 historical quarters
+  - DuckDB warehouse integration with `earnings` table
+
+#### Enhanced Fundamentals
+- Extended `fundamentals` command with additional metrics:
+  - Basic and diluted shares outstanding
+  - Forward P/E and PEG ratio
+  - Price-to-book and price-to-sales ratios
+  - Enterprise value and EV/EBITDA
+  - Gross, operating, and net margins
+  - Return on equity (ROE) and return on assets (ROA)
+
+#### Warehouse Improvements
+- New migration (v3) for `financials` and `earnings` tables
+- Warehouse sync support for financial statements and earnings data
+- Enhanced fundamentals table with new metric columns
+
+### 🔧 Changed
+- **Removed mock mode** - All adapters now use real API calls exclusively
+- Yahoo adapter enhanced to fetch comprehensive financial data via quoteSummary API
+- Improved error handling for missing/null financial data fields
+
+### 📚 Documentation
+- Updated README with financials and earnings usage examples
+- Added quick start examples for new commands
+- Updated capability matrix to reflect financials/earnings support (Yahoo only)
+
+---
+
 ## [0.1.0] - 2026-02-20
 
 ### 🎉 Initial Release
@@ -80,9 +122,11 @@ The first production-ready release of Ferrotick!
 
 | Version | Date | Description |
 |---------|------|-------------|
+| 0.2.0 | 2026-02-26 | Financial statements, earnings data, enhanced fundamentals |
 | 0.1.0 | 2026-02-20 | Initial release |
 
 ---
 
-[Unreleased]: https://github.com/ferrotick/ferrotick/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ferrotick/ferrotick/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ferrotick/ferrotick/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ferrotick/ferrotick/releases/tag/v0.1.0
