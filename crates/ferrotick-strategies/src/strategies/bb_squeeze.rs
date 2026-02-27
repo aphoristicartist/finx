@@ -1,8 +1,12 @@
+use std::collections::VecDeque;
+
 use ferrotick_core::Bar;
 use ferrotick_ml::features::indicators::compute_bollinger;
 
 use crate::traits::strategy::{Order, OrderSide, Signal, SignalAction, Strategy};
 use crate::{StrategyError, StrategyResult};
+
+const MAX_HISTORY: usize = 1000;
 
 #[derive(Debug, Clone)]
 pub struct BollingerBandSqueezeStrategy {
@@ -10,7 +14,7 @@ pub struct BollingerBandSqueezeStrategy {
     period: usize,
     num_std: f64,
     order_quantity: f64,
-    closes: Vec<f64>,
+    closes: VecDeque<f64>,
     prev_in_squeeze: bool,
 }
 
@@ -41,7 +45,7 @@ impl BollingerBandSqueezeStrategy {
             period,
             num_std,
             order_quantity,
-            closes: Vec::new(),
+            closes: VecDeque::with_capacity(MAX_HISTORY),
             prev_in_squeeze: false,
         })
     }
@@ -59,6 +63,7 @@ impl BollingerBandSqueezeStrategy {
             action,
             strength: strength.clamp(0.0, 1.0),
             reason: reason.into(),
+            strategy_name: self.name().to_string(),
         }
     }
 }
@@ -69,11 +74,21 @@ impl Strategy for BollingerBandSqueezeStrategy {
     }
 
     fn on_bar(&mut self, bar: &Bar) -> Option<Signal> {
-        self.closes.push(bar.close);
+        self.closes.push_back(bar.close);
+
+        // Bound the history to prevent O(N²)
+        if self.closes.len() > MAX_HISTORY {
+            self.closes.pop_front();
+        }
+
         if self.closes.len() < self.period {
             return None;
         }
-        let bb = match compute_bollinger(&self.closes, self.period, self.num_std) {
+
+        // Use make_contiguous for compute_bollinger
+        let closes: Vec<f64> = self.closes.make_contiguous().to_vec();
+
+        let bb = match compute_bollinger(&closes, self.period, self.num_std) {
             Ok(bb) => bb,
             Err(err) => {
                 return Some(self.signal(bar, SignalAction::Hold, 0.0, format!("bb_error={err}")));

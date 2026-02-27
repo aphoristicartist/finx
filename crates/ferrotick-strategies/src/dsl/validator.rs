@@ -51,19 +51,61 @@ pub fn validate_strategy_spec(spec: &StrategySpec) -> Vec<ValidationIssue> {
     }
 
     for (idx, rule) in spec.entry_rules.iter().enumerate() {
-        if rule.value.is_finite() == false {
+        if !rule.value.is_finite() {
             issues.push(ValidationIssue {
                 field: format!("entry_rules[{}].value", idx),
-                message: "value must be a finite number".to_string(),
+                message: "value must be a finite number or valid range".to_string(),
+            });
+        }
+        if rule.indicator.trim().is_empty() {
+            issues.push(ValidationIssue {
+                field: format!("entry_rules[{idx}].indicator"),
+                message: "indicator must not be empty".to_string(),
+            });
+        }
+        if !matches!(
+            rule.operator.as_str(),
+            "<" | ">" | "<=" | ">=" | "==" | "between"
+        ) {
+            issues.push(ValidationIssue {
+                field: format!("entry_rules[{idx}].operator"),
+                message: "invalid operator, must be one of: <, >, <=, >=, ==, between".to_string(),
+            });
+        }
+        if !matches!(rule.action.as_str(), "buy" | "sell" | "hold" | "close") {
+            issues.push(ValidationIssue {
+                field: format!("entry_rules[{idx}].action"),
+                message: "invalid action, must be one of: buy, sell, hold, close".to_string(),
             });
         }
     }
 
     for (idx, rule) in spec.exit_rules.iter().enumerate() {
-        if rule.value.is_finite() == false {
+        if !rule.value.is_finite() {
             issues.push(ValidationIssue {
                 field: format!("exit_rules[{}].value", idx),
-                message: "value must be a finite number".to_string(),
+                message: "value must be a finite number or valid range".to_string(),
+            });
+        }
+        if rule.indicator.trim().is_empty() {
+            issues.push(ValidationIssue {
+                field: format!("exit_rules[{idx}].indicator"),
+                message: "indicator must not be empty".to_string(),
+            });
+        }
+        if !matches!(
+            rule.operator.as_str(),
+            "<" | ">" | "<=" | ">=" | "==" | "between"
+        ) {
+            issues.push(ValidationIssue {
+                field: format!("exit_rules[{idx}].operator"),
+                message: "invalid operator, must be one of: <, >, <=, >=, ==, between".to_string(),
+            });
+        }
+        if !matches!(rule.action.as_str(), "buy" | "sell" | "hold" | "close") {
+            issues.push(ValidationIssue {
+                field: format!("exit_rules[{idx}].action"),
+                message: "invalid action, must be one of: buy, sell, hold, close".to_string(),
             });
         }
     }
