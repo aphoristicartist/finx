@@ -31,4 +31,13 @@ pub enum MlError {
 
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+
+    #[error("model training failed: {0}")]
+    Training(String),
+
+    #[error("model prediction failed: {0}")]
+    Prediction(String),
+
+    #[error("ONNX error: {0}")]
+    Onnx(String),
 }

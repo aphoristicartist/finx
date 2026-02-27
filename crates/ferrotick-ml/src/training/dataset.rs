@@ -1,4 +1,4 @@
-use ndarray::{Array1, Array2};
+use ndarray::{s, Array1, Array2};
 
 use crate::features::FeatureRow;
 use crate::{MlError, MlResult};
@@ -15,6 +15,84 @@ pub struct Dataset {
     pub features: Array2<f64>,
     pub targets: Array1<f64>,
     pub timestamps: Vec<String>,
+}
+
+impl Dataset {
+    /// Split dataset into training and test sets.
+    ///
+    /// # Arguments
+    /// * `test_size` - Fraction of data to use for testing (0.0 to 1.0)
+    ///
+    /// # Returns
+    /// Tuple of (train_dataset, test_dataset)
+    pub fn train_test_split(&self, test_size: f64) -> MlResult<(Dataset, Dataset)> {
+        if test_size <= 0.0 || test_size >= 1.0 {
+            return Err(MlError::InvalidInput(String::from(
+                "test_size must be between 0.0 and 1.0 (exclusive)",
+            )));
+        }
+
+        let total_rows = self.targets.len();
+        let test_count = ((total_rows as f64) * test_size).round() as usize;
+        let train_count = total_rows - test_count;
+
+        if train_count == 0 || test_count == 0 {
+            return Err(MlError::NoData(String::from(
+                "insufficient data for train/test split",
+            )));
+        }
+
+        // Split features
+        let train_features = self.features.slice(s![..train_count, ..]).to_owned();
+        let test_features = self.features.slice(s![train_count.., ..]).to_owned();
+
+        // Split targets
+        let train_targets = self.targets.slice(s![..train_count]).to_owned();
+        let test_targets = self.targets.slice(s![train_count..]).to_owned();
+
+        // Split timestamps
+        let train_timestamps = self.timestamps[..train_count].to_vec();
+        let test_timestamps = self.timestamps[train_count..].to_vec();
+
+        let train_dataset = Dataset {
+            feature_names: self.feature_names.clone(),
+            features: train_features,
+            targets: train_targets,
+            timestamps: train_timestamps,
+        };
+
+        let test_dataset = Dataset {
+            feature_names: self.feature_names.clone(),
+            features: test_features,
+            targets: test_targets,
+            timestamps: test_timestamps,
+        };
+
+        Ok((train_dataset, test_dataset))
+    }
+
+    /// Normalize features to zero mean and unit variance.
+    pub fn normalize(&mut self) {
+        let n_features = self.features.ncols();
+
+        for col in 0..n_features {
+            let column = self.features.column(col);
+
+            // Compute mean
+            let mean: f64 = column.mean().unwrap_or(0.0);
+
+            // Compute std dev
+            let variance: f64 = column.mapv(|x| (x - mean).powi(2)).mean().unwrap_or(0.0);
+            let std = variance.sqrt();
+
+            // Avoid division by zero
+            if std > 1e-10 {
+                for row in 0..self.features.nrows() {
+                    self.features[[row, col]] = (self.features[[row, col]] - mean) / std;
+                }
+            }
+        }
+    }
 }
 
 pub struct DatasetBuilder;
