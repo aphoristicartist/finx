@@ -1273,6 +1273,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrotick-optimization"
+version = "0.1.0"
+dependencies = [
+ "ferrotick-backtest",
+ "ferrotick-core",
+ "ferrotick-strategies",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.17",
+ "tokio",
+]
+
+[[package]]
 name = "ferrotick-strategies"
 version = "0.1.0"
 dependencies = [
