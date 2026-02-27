@@ -1,0 +1,19 @@
+[package]
+name = "ferrotick-backtest"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Event-driven backtesting engine for ferrotick"
+
+[dependencies]
+ferrotick-core = { path = "../ferrotick-core" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+tempfile.workspace = true
