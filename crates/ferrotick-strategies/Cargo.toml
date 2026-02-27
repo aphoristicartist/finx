@@ -1,0 +1,16 @@
+[package]
+name = "ferrotick-strategies"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ferrotick-core = { path = "../ferrotick-core" }
+ferrotick-ml = { path = "../ferrotick-ml" }
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+thiserror.workspace = true
+tempfile.workspace = true
+
+[dev-dependencies]
+serde_json = "1.0"

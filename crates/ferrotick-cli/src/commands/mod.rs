@@ -11,9 +11,12 @@ mod schema;
 mod search;
 mod sources;
 mod sql;
+mod strategy;
 mod warehouse_sync;
 
-use ferrotick_core::{Endpoint, Envelope, ProviderId, SourceRouter, SourceRouterBuilder, SourceStrategy};
+use ferrotick_core::{
+    Endpoint, Envelope, ProviderId, SourceRouter, SourceRouterBuilder, SourceStrategy,
+};
 use serde_json::Value;
 
 use crate::cli::{CacheCommand, Cli, Command, SourceSelector};
@@ -68,9 +71,7 @@ impl CommandResult {
 }
 
 pub async fn run(cli: &Cli) -> Result<Envelope<Value>, CliError> {
-    let router = SourceRouterBuilder::new()
-        .with_real_clients()
-        .build();
+    let router = SourceRouterBuilder::new().with_real_clients().build();
     let strategy = to_source_strategy(cli.source);
 
     let command_result = match &cli.command {
@@ -85,22 +86,18 @@ pub async fn run(cli: &Cli) -> Result<Envelope<Value>, CliError> {
             cli.explain,
             non_provider_source_chain(&router, &strategy).await,
         )?,
-        Command::Export(args) => {
-            export::run(args)?
-        }
+        Command::Export(args) => export::run(args)?,
         Command::Ml(args) => {
             ml::run(args, non_provider_source_chain(&router, &strategy).await).await?
         }
-        Command::Cache(args) => {
-            match &args.command {
-                CacheCommand::Load(load_args) => {
-                    cache_load::run(load_args, &router, strategy.clone()).await?
-                }
-                CacheCommand::Sync => {
-                    cache::run(args, non_provider_source_chain(&router, &strategy).await)?
-                }
+        Command::Cache(args) => match &args.command {
+            CacheCommand::Load(load_args) => {
+                cache_load::run(load_args, &router, strategy.clone()).await?
             }
-        }
+            CacheCommand::Sync => {
+                cache::run(args, non_provider_source_chain(&router, &strategy).await)?
+            }
+        },
         Command::Schema(args) => {
             schema::run(args, non_provider_source_chain(&router, &strategy).await)?
         }
@@ -111,6 +108,15 @@ pub async fn run(cli: &Cli) -> Result<Envelope<Value>, CliError> {
                 non_provider_source_chain(&router, &strategy).await,
             )
             .await?
+        }
+        Command::Strategy(args) => {
+            let _ = strategy::run(args).await?;
+            let warnings: Vec<String> = Vec::new();
+            let source_chain = non_provider_source_chain(&router, &strategy).await;
+            return Ok(Envelope::success(
+                Metadata::new(source_chain, 0, true)?.into_envelope_meta("v1.0.0")?,
+                Value::Null,
+            ));
         }
     };
 

@@ -259,6 +259,17 @@ pub enum Command {
 
     /// 🔌 List data source capability matrix.
     Sources(SourcesArgs),
+
+    /// 📚 Strategy library commands.
+    ///
+    /// List built-in strategies, validate YAML strategy specs, and run backtests.
+    ///
+    /// # Examples
+    ///
+    ///   ferrotick strategy list
+    ///   ferrotick strategy validate strategies/rsi.yaml
+    ///   ferrotick strategy backtest strategies/rsi.yaml --symbols AAPL,MSFT
+    Strategy(StrategyArgs),
 }
 
 /// Arguments for the `quote` command.
@@ -539,6 +550,41 @@ pub struct SourcesArgs {
     /// Include detailed capability information.
     #[arg(long, default_value_t = false)]
     pub verbose: bool,
+}
+
+/// Arguments for the `strategy` command.
+#[derive(Debug, Args)]
+pub struct StrategyArgs {
+    #[command(subcommand)]
+    pub command: StrategyCommand,
+}
+
+/// Strategy subcommands.
+#[derive(Debug, Subcommand)]
+pub enum StrategyCommand {
+    /// List built-in strategy templates.
+    List,
+    /// Validate a YAML strategy spec.
+    Validate(StrategyValidateArgs),
+    /// Run backtest from YAML strategy spec.
+    Backtest(StrategyBacktestArgs),
+}
+
+/// Arguments for `strategy validate` command.
+#[derive(Debug, Args)]
+pub struct StrategyValidateArgs {
+    /// Path to YAML strategy file.
+    pub file: String,
+}
+
+/// Arguments for `strategy backtest` command.
+#[derive(Debug, Args)]
+pub struct StrategyBacktestArgs {
+    /// Path to YAML strategy file.
+    pub file: String,
+    /// Comma-separated symbols (e.g., AAPL,MSFT).
+    #[arg(long)]
+    pub symbols: String,
 }
 
 #[cfg(test)]

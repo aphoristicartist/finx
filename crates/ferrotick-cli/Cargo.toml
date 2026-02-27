@@ -15,8 +15,10 @@ arrow = "54"
 clap.workspace = true
 duckdb.workspace = true
 ferrotick-agent = { path = "../ferrotick-agent" }
+ferrotick-backtest = { path = "../ferrotick-backtest" }
 ferrotick-core = { path = "../ferrotick-core" }
 ferrotick-ml = { path = "../ferrotick-ml" }
+ferrotick-strategies = { path = "../ferrotick-strategies" }
 ferrotick-warehouse = { path = "../ferrotick-warehouse" }
 serde.workspace = true
 serde_json.workspace = true
