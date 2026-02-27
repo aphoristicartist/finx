@@ -1,0 +1,30 @@
+# RSI Mean Reversion Strategy
+#
+# Buy when RSI drops below 30 (oversold)
+# Sell when RSI rises above 70 (overbought)
+
+name: rsi_mean_reversion
+type: mean_reversion
+timeframe: 1d
+
+entry_rules:
+  - indicator: rsi
+    period: 14
+    operator: "<"
+    value: 30
+    action: buy
+
+exit_rules:
+  - indicator: rsi
+    period: 14
+    operator: ">"
+    value: 70
+    action: sell
+
+position_sizing:
+  method: percent
+  value: 0.02  # 2% of portfolio per trade
+
+risk_management:
+  stop_loss: 0.05    # 5% stop loss
+  take_profit: 0.10  # 10% take profit

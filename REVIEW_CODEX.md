@@ -1,116 +1,306 @@
-# Phase 8 Implementation Review (Codex)
+### Summary
+The crate compiles, but this Phase 9 implementation is not production-ready yet. There are several correctness/spec violations in the strategy pipeline (trait contract, signal->order flow, DSL handling) plus major validation/testing gaps that can lead to silent misconfiguration and incorrect trades.
 
-## Summary
-The `ferrotick-backtest` crate has a clean modular structure and compiles, but core execution/accounting behavior currently produces biased and sometimes invalid backtest results. The biggest blockers are same-bar signal execution (look-ahead bias), limit/stop fill pricing that can violate order constraints, and trade statistics that can misreport win rate and realized PnL.
-
-## Strengths
-- Good crate/module decomposition (`engine`, `portfolio`, `metrics`, `costs`) with clear boundaries.
-- Correct integration with `ferrotick-core` domain types (`Bar`, `Symbol`, `UtcDateTime`).
-- Event model (`Bar -> Signal -> Order -> Fill`) is straightforward and easy to extend.
-- Cost modeling interfaces are simple and serializable (`FeeModel`, `SlippageModel`).
-- Basic risk metrics (Sharpe, Sortino, drawdown, VaR/CVaR) are implemented and wired into reports.
-
-## Issues Found
-
-### Critical
-- Same-bar execution creates look-ahead bias. In [`crates/ferrotick-backtest/src/engine/event_driven.rs:177`](/Users/aleksandrlisenko/.openclaw/workspace/ferrotick/crates/ferrotick-backtest/src/engine/event_driven.rs:177), strategy signals generated from the current bar are converted to orders and executed against the same bar in [`event_driven.rs:188`](/Users/aleksandrlisenko/.openclaw/workspace/ferrotick/crates/ferrotick-backtest/src/engine/event_driven.rs:188). This allows using bar-close information and filling at that same bar, inflating performance.
-- Limit/stop orders can fill at prices that violate order constraints. Execution always uses slippage on `bar.close` in [`executor.rs:42-44`](/Users/aleksandrlisenko/.openclaw/workspace/ferrotick/crates/ferrotick-backtest/src/engine/executor.rs:42), even for limit/stop orders triggered via high/low checks. A buy limit can be filled above its limit, and a sell limit below its limit.
-
-### Important
-- `start_date` / `end_date` are unused. They exist in [`event_driven.rs:58-59`](/Users/aleksandrlisenko/.openclaw/workspace/ferrotick/crates/ferrotick-backtest/src/engine/event_driven.rs:58) but are never applied in `run`, so config does not enforce backtest date bounds.
-- Trade win-rate accounting is inaccurate for partial exits. `closed_trades` increments on every sell fill in [`portfolio/mod.rs:87-91`](/Users/aleksandrlisenko/.openclaw/workspace/ferrotick/crates/ferrotick-backtest/src/portfolio/mod.rs:87), not when a trade round-trip actually closes.
-- Realized PnL used for win-rate ignores buy-side fees. Sell-side realized PnL subtracts only sell fees in [`position.rs:105`](/Users/aleksandrlisenko/.openclaw/workspace/ferrotick/crates/ferrotick-backtest/src/portfolio/position.rs:105). Buy fees reduce cash but not position cost basis/realized trade PnL, which can overstate wins.
-- Engine state is not reset between runs. `BacktestEngine::run` mutates persistent `portfolio`, `latest_bars`, and `event_bus` state and does not clear them, so reusing the same engine instance carries prior run state.
-- Input validation gaps for order price fields. `execute` checks quantity but does not validate `limit_price`/`stop_price` finiteness or positivity when present; invalid values can pass through trigger logic.
-
-### Minor
-- `OrderStatus` is defined but never meaningfully used/updated (`New` is set in [`portfolio/order.rs:63`](/Users/aleksandrlisenko/.openclaw/workspace/ferrotick/crates/ferrotick-backtest/src/portfolio/order.rs:63), but no lifecycle transitions are recorded).
-- `BacktestEngine::run` is `async` without awaiting anything (could be synchronous until real async feeds are introduced).
-- No TODO markers for explicitly deferred features, despite planned future items (for example vectorized backtesting).
-- VaR/CVaR are returned as raw return quantiles (often negative). If the intended API is loss magnitude, sign conventions should be documented or normalized.
-
-## Missing Features
-- No CLI integration for Phase 8 deliverable (`ferrotick backtest ...`) appears implemented in current source tree.
-- No benchmark comparison output (e.g., S&P 500) as listed in roadmap deliverables/tasks.
-- No persistent order book/lifecycle support (pending orders across bars, cancel/reject paths, status transitions).
-- No partial-fill / liquidity-cap execution model (volume participation is only used for slippage bps).
-- No explicit support for short-selling/margin workflows (currently sell quantities are constrained by held long position).
-- No vectorized engine stub/module (`vectorized.rs`) and no in-code TODO explaining deferment.
-
-## Testing Recommendations
-- Add unit tests for execution realism:
-  - `limit_buy` never fills above limit; `limit_sell` never below limit.
-  - Stop orders trigger/fill with gap scenarios (open through stop).
-- Add regression tests preventing look-ahead bias:
-  - Signal generated on bar `t` executes earliest at bar `t+1` (or documented policy).
-- Add portfolio accounting tests:
-  - Round-trip trade PnL includes both buy/sell fees.
-  - Partial exits do not inflate `closed_trades` and `win_rate`.
-- Add config behavior tests:
-  - `start_date`/`end_date` filtering and boundary inclusion behavior.
-  - Re-running engine instance does not contaminate results (or enforce single-use API).
-- Add robustness tests:
-  - Invalid/NaN limit/stop prices rejected.
-  - Extreme fee/slippage inputs do not produce NaN/inf report fields.
-- Add metrics tests with known fixtures:
-  - Sharpe/Sortino/drawdown/VaR/CVaR against deterministic expected values.
-
-## Code Examples
-```rust
-// Current behavior (look-ahead): signal from current bar can be executed on current bar
-if let Some(signal) = strategy.on_bar(&bar_event, &self.portfolio) {
-    self.event_bus.publish(BacktestEvent::Signal(signal))?;
-}
-...
-BacktestEvent::Order(order) => {
-    let bar = self.latest_bars.get(&order.symbol)...?;
-    if let Some(fill) = self.order_executor.execute(&order, bar, &self.config.costs)? {
-        self.event_bus.publish(BacktestEvent::Fill(fill))?;
-    }
-}
-```
-Source: [`crates/ferrotick-backtest/src/engine/event_driven.rs:177`](/Users/aleksandrlisenko/.openclaw/workspace/ferrotick/crates/ferrotick-backtest/src/engine/event_driven.rs:177), [`event_driven.rs:188`](/Users/aleksandrlisenko/.openclaw/workspace/ferrotick/crates/ferrotick-backtest/src/engine/event_driven.rs:188)
-
-```rust
-// Current behavior: all orders price off close, even limit/stop
-let execution_price = self
-    .slippage
-    .execution_price(order.side, bar, order.quantity);
-```
-Source: [`crates/ferrotick-backtest/src/engine/executor.rs:42`](/Users/aleksandrlisenko/.openclaw/workspace/ferrotick/crates/ferrotick-backtest/src/engine/executor.rs:42)
-
-```rust
-// Current behavior: win-rate increments on every sell fill
-if fill.side == OrderSide::Sell {
-    self.closed_trades += 1;
-    if realized_delta > 0.0 {
-        self.winning_trades += 1;
-    }
-}
-```
-Source: [`crates/ferrotick-backtest/src/portfolio/mod.rs:87`](/Users/aleksandrlisenko/.openclaw/workspace/ferrotick/crates/ferrotick-backtest/src/portfolio/mod.rs:87)
-
-Recommended direction (high-level):
-```rust
-// Enforce non-lookahead policy:
-// 1) Generate orders on bar t
-// 2) Queue them as pending
-// 3) Fill earliest on next bar using open/limit/stop logic with price bounds
-
-// Enforce price constraints:
-// buy limit fill_price <= limit
-// sell limit fill_price >= limit
-// stop orders transition to market-on-trigger with explicit trigger price policy
+### Critical Issues (must fix)
+Signal generation/order conversion has hard blockers and DSL behavior can silently misconfigure trading logic.
+- [ ] crates/ferrotick-strategies/src/traits/strategy.rs:50 — `Strategy` is not `Send + Sync`. This blocks safe integration with async/backtest adapters that require sendable strategy state. Suggested fix.
+```diff
+-pub trait Strategy {
++pub trait Strategy: Send + Sync {
 ```
 
-## Verdict
-- [ ] APPROVED - Ready to merge
-- [x] NEEDS FIXES - Requires changes before merge
-- [ ] MAJOR REVISION - Significant rework needed
+- [ ] crates/ferrotick-strategies/src/signals/generator.rs:21 — `SignalGenerator` is missing `on_signal`, so the framework cannot convert generated signals into orders across strategies (required by the trait and Phase 9 flow). Suggested fix.
+```diff
+-use crate::traits::strategy::{Signal, Strategy};
++use crate::traits::strategy::{Order, Signal, Strategy};
+@@
+     pub fn on_bar(&mut self, bar: &Bar) -> Vec<Signal> {
+         self.strategies
+             .iter_mut()
+             .filter_map(|strategy| strategy.on_bar(bar))
+             .collect()
+     }
++
++    pub fn on_signal(&mut self, signal: &Signal) -> Vec<Order> {
++        self.strategies
++            .iter_mut()
++            .filter_map(|strategy| strategy.on_signal(signal))
++            .collect()
++    }
+```
 
-## Detailed Notes
-- Architecture quality is strong: the crate shape and event abstraction are maintainable and aligned with the Phase 8 direction.
-- The largest risk is correctness, not structure. Current execution semantics can materially overestimate performance.
-- Report quality is currently constrained by accounting semantics (trade closure and fee attribution), which directly affects user-facing `win_rate` and potentially strategy ranking.
-- The module compiles and is easy to read, but production-grade confidence is low due to zero tests (`cargo test -p ferrotick-backtest` ran with 0 unit/doc tests in this crate).
-- Recommend fixing critical execution semantics first, then adding a focused regression test suite before further feature expansion.
+- [ ] crates/ferrotick-strategies/src/dsl/parser.rs:23 — `IndicatorRule` cannot parse documented strategy examples (`name`/`condition` fields and non-scalar `value` like `[45,55]`), despite `deny_unknown_fields`. This causes valid documented specs to fail parsing. Suggested fix.
+```diff
++#[derive(Debug, Clone, Deserialize)]
++#[serde(untagged)]
++pub enum RuleValue {
++    Scalar(f64),
++    Range([f64; 2]),
++}
++
+ #[derive(Debug, Clone, Deserialize)]
+ #[serde(deny_unknown_fields)]
+ pub struct IndicatorRule {
++    #[serde(default)]
++    pub name: Option<String>,
++    #[serde(default)]
++    pub condition: Option<String>,
+     pub indicator: String,
+     #[serde(default)]
+     pub period: Option<usize>,
+     pub operator: String,
+-    pub value: f64,
++    pub value: RuleValue,
+     pub action: String,
+ }
+```
+
+- [ ] crates/ferrotick-strategies/src/dsl/mod.rs:82 — Unknown `position_sizing.method` silently falls back to `Percent`. This can place orders with unintended risk when a config is misspelled. Suggested fix.
+```diff
+     let method = match spec.position_sizing.method.as_str() {
+         "fixed" => PositionSizingMethod::Fixed,
+         "percent" => PositionSizingMethod::Percent,
+         "volatility" => PositionSizingMethod::Volatility,
+         "kelly" => PositionSizingMethod::Kelly,
+-        _ => PositionSizingMethod::Percent,
++        other => {
++            return Err(StrategyError::InvalidConfig(format!(
++                "unknown position sizing method: {other}"
++            )))
++        }
+     };
+```
+
+- [ ] crates/ferrotick-strategies/src/dsl/mod.rs:66 — `bb_squeeze` `num_std` extraction is incorrect (`extract_value` matches `operator`, not `indicator`), so user-configured std-dev is ignored. This produces wrong signals while appearing configured correctly. Suggested fix.
+```diff
+-            let num_std = extract_value(&spec.entry_rules, "num_std", 2.0);
++            let num_std = extract_indicator_value(&spec.entry_rules, "num_std", 2.0);
+@@
++fn extract_indicator_value(rules: &[IndicatorRule], indicator: &str, default: f64) -> f64 {
++    rules
++        .iter()
++        .find(|r| r.indicator.eq_ignore_ascii_case(indicator))
++        .and_then(|r| match &r.value {
++            RuleValue::Scalar(v) => Some(*v),
++            RuleValue::Range(_) => None,
++        })
++        .unwrap_or(default)
++}
+```
+
+- [ ] crates/ferrotick-strategies/src/dsl/mod.rs:41 — Strategy order quantity is derived from `position_sizing.value` directly for all strategies. This conflates signal generation with sizing and can produce nonsensical quantities (e.g., `percent=0.1` becomes `0.1` shares). Suggested fix.
+```diff
+-            let qty = spec.position_sizing.value;
++            let qty = 1.0;
+```
+Apply the same change at lines 50, 59, and 67; use `build_position_sizer` at execution time for final quantity.
+
+### Important Issues (should fix)
+These issues degrade correctness, resilience, and maintainability.
+- [ ] crates/ferrotick-strategies/src/dsl/validator.rs:53 — Rule validation is incomplete (no checks for empty rule sets, invalid operators/actions, missing indicator names, or invalid periods). Invalid specs pass validation and fail later in less clear ways. Suggested fix.
+```diff
++use super::parser::{RuleValue, StrategySpec};
+
++    if spec.entry_rules.is_empty() {
++        issues.push(ValidationIssue {
++            field: "entry_rules".to_string(),
++            message: "must contain at least one rule".to_string(),
++        });
++    }
++    if spec.exit_rules.is_empty() {
++        issues.push(ValidationIssue {
++            field: "exit_rules".to_string(),
++            message: "must contain at least one rule".to_string(),
++        });
++    }
+@@
+     for (idx, rule) in spec.entry_rules.iter().enumerate() {
+-        if rule.value.is_finite() == false {
++        if rule.indicator.trim().is_empty() {
++            issues.push(ValidationIssue {
++                field: format!("entry_rules[{idx}].indicator"),
++                message: "indicator must not be empty".to_string(),
++            });
++        }
++        if rule.period == Some(0) {
++            issues.push(ValidationIssue {
++                field: format!("entry_rules[{idx}].period"),
++                message: "period must be > 0".to_string(),
++            });
++        }
++        if !matches!(rule.operator.as_str(), "<" | ">" | "<=" | ">=" | "==" | "between") {
++            issues.push(ValidationIssue {
++                field: format!("entry_rules[{idx}].operator"),
++                message: "invalid operator".to_string(),
++            });
++        }
++        if !matches!(rule.action.as_str(), "buy" | "sell" | "hold" | "close") {
++            issues.push(ValidationIssue {
++                field: format!("entry_rules[{idx}].action"),
++                message: "invalid action".to_string(),
++            });
++        }
++        let value_ok = match &rule.value {
++            RuleValue::Scalar(v) => v.is_finite(),
++            RuleValue::Range([low, high]) => low.is_finite() && high.is_finite() && low <= high,
++        };
++        if !value_ok {
+             issues.push(ValidationIssue {
+                 field: format!("entry_rules[{}].value", idx),
+                 message: "value must be finite (and range low<=high)".to_string(),
+             });
+         }
+     }
+```
+
+- [ ] crates/ferrotick-strategies/src/sizing/position.rs:67 — `PercentSizer` and `KellySizer` can allocate >100% equity with no cap, and Kelly input bounds are not validated (`win_rate`/`fraction`). This can generate extreme leverage unexpectedly. Suggested fix.
+```diff
+ impl PositionSizer for PercentSizer {
+     fn size(&self, ctx: &PositionSizingContext) -> f64 {
+@@
+-        let allocation = ctx.equity * self.percent;
++        let percent = self.percent.clamp(0.0, 1.0);
++        let allocation = ctx.equity * percent;
+         (allocation / ctx.price).max(0.0)
+     }
+ }
+@@
+ impl PositionSizer for KellySizer {
+     fn size(&self, ctx: &PositionSizingContext) -> f64 {
+@@
+-        if !win_rate.is_finite() || !win_loss_ratio.is_finite() {
++        if !win_rate.is_finite()
++            || !(0.0..=1.0).contains(&win_rate)
++            || !win_loss_ratio.is_finite()
++            || win_loss_ratio <= 0.0
++        {
+             return 0.0;
+         }
+@@
+-        let adjusted_fraction = (kelly_fraction * self.fraction).max(0.0);
++        let adjusted_fraction =
++            (kelly_fraction * self.fraction.clamp(0.0, 1.0)).clamp(0.0, 1.0);
+```
+
+- [ ] crates/ferrotick-strategies/src/strategies/macd_trend.rs:78 — MACD warmup is off by one (`slow + signal` instead of `slow + signal - 1`), delaying first valid decision and shifting signals. Suggested fix.
+```diff
+-        if self.closes.len() < self.slow_period + self.signal_period {
++        if self.closes.len() < self.slow_period + self.signal_period - 1 {
+             return None;
+         }
+```
+
+- [ ] crates/ferrotick-strategies/src/strategies/rsi_reversion.rs:80 — RSI/MACD/BB strategies recompute indicators over full history each bar (`O(N^2)`) and grow `closes` unbounded. This will degrade long backtests significantly. Suggested fix (immediate safety cap).
+```diff
+ // rsi_reversion.rs
+     fn on_bar(&mut self, bar: &Bar) -> Option<Signal> {
+         self.closes.push(bar.close);
++        const MAX_HISTORY: usize = 2048;
++        if self.closes.len() > MAX_HISTORY {
++            self.closes.remove(0);
++        }
+```
+Apply the same cap in `macd_trend.rs` (after line 77) and `bb_squeeze.rs` (after line 72). Longer-term: migrate to incremental indicator state.
+
+- [ ] crates/ferrotick-strategies/src/traits/strategy.rs:71 — `Portfolio::equity()` is mathematically incorrect (`cash + position` assumes `position` is currency, not quantity). If this type is used, risk/PnL will be wrong. Suggested fix.
+```diff
+-    pub fn equity(&self) -> f64 {
+-        self.cash + self.position
++    pub fn equity(&self, mark_price: f64) -> f64 {
++        self.cash + (self.position * mark_price)
+     }
+```
+
+- [ ] crates/ferrotick-strategies/src/lib.rs:1 — Test coverage is effectively absent (`cargo test -p ferrotick-strategies` runs 0 tests). Strategy logic, DSL validation, and sizing math are currently unguarded. Suggested fix.
+```diff
+*** Add File: crates/ferrotick-strategies/tests/phase9_strategy_library.rs
++use ferrotick_strategies::dsl::parse_and_validate_strategy_yaml;
++use ferrotick_strategies::strategies::MovingAverageCrossoverStrategy;
++use ferrotick_strategies::traits::Strategy;
++
++#[test]
++fn validates_known_good_yaml() {
++    let raw = r#"
++name: rsi_mean_reversion
++type: mean_reversion
++timeframe: 1d
++entry_rules:
++  - indicator: rsi
++    period: 14
++    operator: "<"
++    value: 30
++    action: buy
++exit_rules:
++  - indicator: rsi
++    period: 14
++    operator: ">"
++    value: 70
++    action: sell
++position_sizing:
++  method: percent
++  value: 0.1
++"#;
++    parse_and_validate_strategy_yaml(raw).expect("must parse/validate");
++}
++
++#[test]
++fn ma_crossover_constructs_with_valid_params() {
++    MovingAverageCrossoverStrategy::new("AAPL", 10, 20, 1.0).expect("must build");
++}
+```
+
+### Minor Issues (nice to have)
+These are lower-risk cleanup items.
+- [ ] crates/ferrotick-strategies/src/dsl/validator.rs:53 — Operator/action comparisons are case-sensitive, which is stricter than necessary and hurts UX for YAML authors.
+```diff
++        let operator = rule.operator.trim().to_ascii_lowercase();
++        if !matches!(operator.as_str(), "<" | ">" | "<=" | ">=" | "==" | "between") {
++            // ...
++        }
++        let action = rule.action.trim().to_ascii_lowercase();
++        if !matches!(action.as_str(), "buy" | "sell" | "hold" | "close") {
++            // ...
++        }
+```
+
+- [ ] crates/ferrotick-strategies/src/strategies/ma_crossover.rs:51 — Signal construction logic is duplicated across all four strategies, increasing maintenance cost and drift risk.
+```diff
+*** Add File: crates/ferrotick-strategies/src/strategies/common.rs
++use ferrotick_core::Bar;
++use crate::traits::strategy::{Signal, SignalAction};
++
++pub fn build_signal(symbol: &str, bar: &Bar, action: SignalAction, strength: f64, reason: String) -> Signal {
++    Signal {
++        symbol: symbol.to_string(),
++        ts: bar.ts.format_rfc3339(),
++        action,
++        strength: strength.clamp(0.0, 1.0),
++        reason,
++    }
++}
+```
+Then replace local `fn signal(...)` bodies in each strategy with calls to `common::build_signal`.
+
+- [ ] crates/ferrotick-strategies/src/lib.rs:1 — Public API has minimal rustdoc coverage, which makes DSL/sizing behavior harder to use correctly from CLI and downstream crates.
+```diff
++/// Parse, validate, and compile YAML-based trading strategies.
+ pub mod dsl;
++/// Position-sizing methods (fixed/percent/volatility/kelly).
+ pub mod sizing;
++/// Signal generation and aggregation utilities.
+ pub mod signals;
+```
+
+### Recommendations
+1. Add a full strategy test matrix (warmup behavior, crossover boundaries, invalid configs, sizing edge-cases, parser/validator negative tests).
+2. Separate concerns strictly: strategies should emit normalized intent; sizing should be applied once in execution adapter.
+3. Replace full-history indicator recomputation with incremental indicator state to keep runtime near `O(N)`.
+4. Align DSL schema and repository examples, then pin with compatibility tests to avoid future drift.
+5. Add integration tests that bridge `ferrotick-strategies` outputs into `ferrotick-backtest` order types.
+
+### Positive Findings
+1. Constructors in all four strategies validate most obvious invalid parameters early and return typed errors.
+2. `serde(deny_unknown_fields)` is used on DSL structs, which is good for typo detection.
+3. `SignalAction`/`OrderSide` models are simple and coherent across strategies.
+4. Position sizing implementations handle basic non-finite/zero guards instead of panicking.
+5. Strategy registry (`built_in_strategies`) is clean and CLI-friendly.

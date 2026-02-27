@@ -23,6 +23,9 @@ pub enum CliError {
 
     #[error(transparent)]
     Stream(#[from] ferrotick_agent::stream::StreamError),
+
+    #[error("strategy error: {0}")]
+    Strategy(#[from] ferrotick_strategies::StrategyError),
 }
 
 impl CliError {
@@ -34,6 +37,7 @@ impl CliError {
             Self::Serialization(_) => 4,
             Self::Io(_) => 10,
             Self::Stream(_) => 6,
+            Self::Strategy(_) => 2,
         }
     }
 }
