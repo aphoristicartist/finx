@@ -40,6 +40,10 @@ impl Portfolio {
         }
     }
 
+    pub fn reset(&mut self) {
+        *self = Self::new(0.0);
+    }
+
     pub fn update_price(&mut self, symbol: &Symbol, price: f64) {
         if !price.is_finite() || price <= 0.0 {
             return;
@@ -84,7 +88,8 @@ impl Portfolio {
         self.trade_count += 1;
         self.realized_pnl += realized_delta;
 
-        if fill.side == OrderSide::Sell {
+        // Only increment closed_trades when position is fully flat (Issue 3 fix)
+        if became_flat && fill.side == OrderSide::Sell {
             self.closed_trades += 1;
             if realized_delta > 0.0 {
                 self.winning_trades += 1;

@@ -83,8 +83,10 @@ impl Position {
 
         match fill.side {
             OrderSide::Buy => {
+                // Issue 4 fix: Include buy-side fees in the average price calculation
                 let new_qty = self.quantity + fill.quantity;
-                let total_cost = (self.average_price * self.quantity) + (fill.price * fill.quantity);
+                // Total cost includes both the purchase price and fees for buy orders
+                let total_cost = (self.average_price * self.quantity) + (fill.price * fill.quantity) + fill.fees;
 
                 self.quantity = new_qty;
                 self.average_price = if new_qty > POSITION_EPSILON {
@@ -102,7 +104,13 @@ impl Position {
                     });
                 }
 
-                self.realized_pnl += (fill.price - self.average_price) * fill.quantity - fill.fees;
+                // Issue 4 fix: Include both buy and sell fees in realized PnL
+                // For sell orders, the fee is already subtracted from proceeds
+                // The buy fees were already accounted for in the average_price calculation
+                let sell_proceeds = fill.price * fill.quantity;
+                let total_fees_on_sell = fill.fees;
+                
+                self.realized_pnl += (sell_proceeds - total_fees_on_sell) - (self.average_price * fill.quantity);
                 self.quantity -= fill.quantity;
 
                 if self.quantity <= POSITION_EPSILON {
