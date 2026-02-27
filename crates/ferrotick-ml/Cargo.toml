@@ -1,0 +1,19 @@
+[package]
+name = "ferrotick-ml"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ferrotick-core = { path = "../ferrotick-core" }
+ferrotick-warehouse = { path = "../ferrotick-warehouse" }
+ta = "0.5"
+ndarray = { version = "0.15", features = ["rayon"] }
+polars = { version = "0.41", features = ["lazy", "parquet", "dtype-datetime"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["full"] }
+thiserror = "2.0"
+duckdb = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.17"

@@ -321,6 +321,31 @@ impl Warehouse {
         self.manager.db_path()
     }
 
+    /// Acquire a database connection for advanced operations.
+    ///
+    /// # Security Note
+    /// This method provides direct connection access for operations that require
+    /// parameterized queries or batch transactions. Callers are responsible for
+    /// proper query construction and security.
+    ///
+    /// # Arguments
+    /// * `mode` - Access mode (ReadOnly or ReadWrite)
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// use ferrotick_warehouse::{Warehouse, AccessMode};
+    /// let warehouse = Warehouse::open_default()?;
+    /// let connection = warehouse.acquire_connection(AccessMode::ReadWrite)?;
+    /// // Use connection for parameterized queries
+    /// # Ok::<(), ferrotick_warehouse::WarehouseError>(())
+    /// ```
+    pub fn acquire_connection(
+        &self,
+        mode: AccessMode,
+    ) -> Result<PooledConnection, WarehouseError> {
+        self.manager.acquire(mode).map_err(WarehouseError::from)
+    }
+
     /// Execute a SQL query with guardrails.
     ///
     /// # Arguments

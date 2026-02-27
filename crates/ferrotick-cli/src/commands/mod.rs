@@ -5,6 +5,7 @@ mod earnings;
 mod export;
 mod financials;
 mod fundamentals;
+mod ml;
 mod quote;
 mod schema;
 mod search;
@@ -86,6 +87,9 @@ pub async fn run(cli: &Cli) -> Result<Envelope<Value>, CliError> {
         )?,
         Command::Export(args) => {
             export::run(args)?
+        }
+        Command::Ml(args) => {
+            ml::run(args, non_provider_source_chain(&router, &strategy).await).await?
         }
         Command::Cache(args) => {
             match &args.command {

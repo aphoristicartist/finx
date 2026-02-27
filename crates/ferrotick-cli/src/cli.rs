@@ -242,6 +242,15 @@ pub enum Command {
     ///   ferrotick export --output data.parquet --format parquet --query "SELECT * FROM bars_1d"
     Export(ExportArgs),
 
+    /// 🤖 ML feature engineering commands.
+    ///
+    /// # Examples
+    ///
+    ///   ferrotick ml features AAPL --indicators rsi,macd,bb,atr --window 20 --output json
+    ///   ferrotick ml features AAPL --indicators all --start 2024-01-01 --end 2024-12-31
+    ///   ferrotick ml export AAPL --output features.parquet
+    Ml(MlArgs),
+
     /// 📦 Cache management commands.
     Cache(CacheArgs),
 
@@ -420,6 +429,65 @@ pub struct ExportArgs {
     pub query_timeout_ms: Option<String>,
 }
 
+#[derive(Debug, Args)]
+pub struct MlArgs {
+    #[command(subcommand)]
+    pub command: MlCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum MlCommand {
+    /// Compute technical features and persist them to DuckDB.
+    Features(MlFeaturesArgs),
+
+    /// Export persisted features to Parquet.
+    Export(MlExportArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct MlFeaturesArgs {
+    /// Market symbol to compute features for.
+    pub symbol: String,
+
+    /// Indicator list: all,rsi,macd,bb,atr.
+    #[arg(long, default_value = "all")]
+    pub indicators: String,
+
+    /// Rolling window size for window-based features.
+    #[arg(long, default_value_t = 20)]
+    pub window: usize,
+
+    /// Optional start date/time (YYYY-MM-DD or RFC3339).
+    #[arg(long)]
+    pub start: Option<String>,
+
+    /// Optional end date/time (YYYY-MM-DD or RFC3339).
+    #[arg(long)]
+    pub end: Option<String>,
+
+    /// Output mode. Phase 7 supports `json` only.
+    #[arg(long, default_value = "json")]
+    pub output: String,
+}
+
+#[derive(Debug, Args)]
+pub struct MlExportArgs {
+    /// Market symbol to export feature rows for.
+    pub symbol: String,
+
+    /// Optional start date/time (YYYY-MM-DD or RFC3339).
+    #[arg(long)]
+    pub start: Option<String>,
+
+    /// Optional end date/time (YYYY-MM-DD or RFC3339).
+    #[arg(long)]
+    pub end: Option<String>,
+
+    /// Parquet output file path.
+    #[arg(long)]
+    pub output: String,
+}
+
 /// Cache management subcommands.
 #[derive(Debug, Subcommand)]
 pub enum CacheCommand {
@@ -471,4 +539,67 @@ pub struct SourcesArgs {
     /// Include detailed capability information.
     #[arg(long, default_value_t = false)]
     pub verbose: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn parses_ml_features_command() {
+        let cli = Cli::try_parse_from([
+            "ferrotick",
+            "ml",
+            "features",
+            "AAPL",
+            "--indicators",
+            "rsi,macd,bb,atr",
+            "--window",
+            "20",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-12-31",
+            "--output",
+            "json",
+        ])
+        .expect("parse");
+
+        match cli.command {
+            Command::Ml(args) => match args.command {
+                MlCommand::Features(feature_args) => {
+                    assert_eq!(feature_args.symbol, "AAPL");
+                    assert_eq!(feature_args.window, 20);
+                    assert_eq!(feature_args.output, "json");
+                }
+                _ => panic!("expected ml features"),
+            },
+            _ => panic!("expected ml command"),
+        }
+    }
+
+    #[test]
+    fn parses_ml_export_command() {
+        let cli = Cli::try_parse_from([
+            "ferrotick",
+            "ml",
+            "export",
+            "AAPL",
+            "--output",
+            "features.parquet",
+        ])
+        .expect("parse");
+
+        match cli.command {
+            Command::Ml(args) => match args.command {
+                MlCommand::Export(export_args) => {
+                    assert_eq!(export_args.symbol, "AAPL");
+                    assert_eq!(export_args.output, "features.parquet");
+                }
+                _ => panic!("expected ml export"),
+            },
+            _ => panic!("expected ml command"),
+        }
+    }
 }
