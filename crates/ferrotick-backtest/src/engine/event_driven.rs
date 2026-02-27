@@ -116,6 +116,7 @@ pub struct BacktestEngine {
     order_executor: OrderExecutor,
     event_bus: EventBus,
     latest_bars: HashMap<Symbol, Bar>,
+    pending_orders: Vec<Order>,
 }
 
 impl BacktestEngine {
@@ -126,6 +127,7 @@ impl BacktestEngine {
             config,
             event_bus: EventBus::new(),
             latest_bars: HashMap::new(),
+            pending_orders: Vec::new(),
         }
     }
 
@@ -148,9 +150,29 @@ impl BacktestEngine {
             return Err(BacktestError::NoMarketData);
         }
 
+        // Reset state for clean run (Issue 5: Engine state reset)
+        self.portfolio.reset();
+        self.latest_bars.clear();
+        self.pending_orders.clear();
+
         let mut equity_curve = Vec::with_capacity(data.len());
 
         for bar_event in data {
+            // First, execute any pending orders from previous bars using this bar's open price
+            if !self.pending_orders.is_empty() {
+                let orders_to_execute = std::mem::take(&mut self.pending_orders);
+                for order in orders_to_execute {
+                    let bar = self
+                        .latest_bars
+                        .get(&order.symbol)
+                        .ok_or_else(|| BacktestError::MissingBarForSymbol(order.symbol.to_string()))?;
+
+                    if let Some(fill) = self.order_executor.execute(&order, bar, &self.config.costs)? {
+                        self.event_bus.publish(BacktestEvent::Fill(fill))?;
+                    }
+                }
+            }
+
             self.event_bus.publish(BacktestEvent::Bar(bar_event.clone()))?;
             self.process_event_queue(strategy)?;
 
@@ -160,6 +182,21 @@ impl BacktestEngine {
                 cash: self.portfolio.cash(),
                 position_value: self.portfolio.position_value(),
             });
+        }
+
+        // Execute any remaining pending orders at the end
+        if !self.pending_orders.is_empty() {
+            let orders_to_execute = std::mem::take(&mut self.pending_orders);
+            for order in orders_to_execute {
+                let bar = self
+                    .latest_bars
+                    .get(&order.symbol)
+                    .ok_or_else(|| BacktestError::MissingBarForSymbol(order.symbol.to_string()))?;
+
+                if let Some(fill) = self.order_executor.execute(&order, bar, &self.config.costs)? {
+                    self.event_bus.publish(BacktestEvent::Fill(fill))?;
+                }
+            }
         }
 
         self.generate_report(equity_curve)
@@ -182,10 +219,12 @@ impl BacktestEngine {
                     if let Some(order) =
                         strategy.create_order(&signal, &self.portfolio, &self.config)
                     {
-                        self.event_bus.publish(BacktestEvent::Order(order))?;
+                        // Queue the order for execution on the NEXT bar (prevents look-ahead bias - Issue 1)
+                        self.pending_orders.push(order);
                     }
                 }
                 BacktestEvent::Order(order) => {
+                    // Orders should now only come from pending_orders execution
                     let bar = self
                         .latest_bars
                         .get(&order.symbol)
