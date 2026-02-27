@@ -73,6 +73,7 @@ impl CompositeSignalGenerator {
             action,
             strength,
             reason: format!("majority buy={buy}, sell={sell}, total={}", signals.len()),
+            strategy_name: "composite_majority".to_string(),
         }
     }
 
@@ -90,18 +91,17 @@ impl CompositeSignalGenerator {
             action,
             strength: if all_same { 1.0 } else { 0.0 },
             reason: format!("unanimous all_same={all_same}"),
+            strategy_name: "composite_unanimous".to_string(),
         }
     }
 
     fn combine_weighted(&self, signals: &[Signal], seed: &Signal) -> Signal {
-        let names = self.generator.strategy_names();
         let mut weighted_score = 0.0;
         let mut weight_sum = 0.0;
-        for (idx, signal) in signals.iter().enumerate() {
-            let strategy_name = names.get(idx).map_or("unknown", String::as_str);
+        for signal in signals.iter() {
             let weight = self
                 .performance_weights
-                .get(strategy_name)
+                .get(&signal.strategy_name)
                 .copied()
                 .unwrap_or(1.0)
                 .max(0.0);
@@ -131,6 +131,7 @@ impl CompositeSignalGenerator {
             action,
             strength: normalized.abs().clamp(0.0, 1.0),
             reason: format!("weighted_score={normalized:.4}"),
+            strategy_name: "composite_weighted".to_string(),
         }
     }
 }

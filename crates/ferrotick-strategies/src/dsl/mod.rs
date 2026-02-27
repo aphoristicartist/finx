@@ -11,7 +11,7 @@ use crate::strategies::{
 use crate::traits::strategy::Strategy;
 use crate::{StrategyError, StrategyResult};
 
-pub use parser::{IndicatorRule, StrategySpec};
+pub use parser::{IndicatorRule, RuleValue, StrategySpec};
 pub use validator::{validate_strategy_spec, ValidationIssue};
 
 pub fn parse_and_validate_file(path: &Path) -> StrategyResult<StrategySpec> {
@@ -63,7 +63,7 @@ pub fn build_strategy(spec: &StrategySpec, symbol: &str) -> StrategyResult<Box<d
         }
         "bb_squeeze" => {
             let period = extract_period(&spec.entry_rules, "period", 20);
-            let num_std = extract_value(&spec.entry_rules, "num_std", 2.0);
+            let num_std = extract_indicator_value(&spec.entry_rules, "num_std", 2.0);
             let qty = spec.position_sizing.value;
             Ok(Box::new(BollingerBandSqueezeStrategy::new(
                 symbol, period, num_std, qty,
@@ -84,7 +84,11 @@ pub fn build_position_sizer(
         "percent" => PositionSizingMethod::Percent,
         "volatility" => PositionSizingMethod::Volatility,
         "kelly" => PositionSizingMethod::Kelly,
-        _ => PositionSizingMethod::Percent,
+        other => {
+            return Err(StrategyError::InvalidConfig(format!(
+                "unknown position sizing method: {other}"
+            )))
+        }
     };
     Ok(build_sizer(PositionSizingConfig {
         method,
@@ -104,6 +108,14 @@ fn extract_value(rules: &[IndicatorRule], operator: &str, default: f64) -> f64 {
     rules
         .iter()
         .find(|r| r.operator == operator)
-        .map(|r| r.value)
+        .map(|r| r.value.to_f64())
+        .unwrap_or(default)
+}
+
+fn extract_indicator_value(rules: &[IndicatorRule], indicator: &str, default: f64) -> f64 {
+    rules
+        .iter()
+        .find(|r| r.indicator.eq_ignore_ascii_case(indicator))
+        .map(|r| r.value.to_f64())
         .unwrap_or(default)
 }

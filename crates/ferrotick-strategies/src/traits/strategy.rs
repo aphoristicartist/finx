@@ -15,6 +15,7 @@ pub struct Signal {
     pub action: SignalAction,
     pub strength: f64,
     pub reason: String,
+    pub strategy_name: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,7 +48,7 @@ impl Order {
     }
 }
 
-pub trait Strategy {
+pub trait Strategy: Send + Sync {
     fn name(&self) -> &str;
     fn on_bar(&mut self, bar: &Bar) -> Option<Signal>;
     fn on_signal(&mut self, signal: &Signal) -> Option<Order>;

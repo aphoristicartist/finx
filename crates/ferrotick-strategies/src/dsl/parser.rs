@@ -19,13 +19,40 @@ pub struct StrategySpec {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum RuleValue {
+    Scalar(f64),
+    Range([f64; 2]),
+}
+
+impl RuleValue {
+    pub fn to_f64(&self) -> f64 {
+        match self {
+            RuleValue::Scalar(v) => *v,
+            RuleValue::Range([min, max]) => (min + max) / 2.0,
+        }
+    }
+
+    pub fn is_finite(&self) -> bool {
+        match self {
+            RuleValue::Scalar(v) => v.is_finite(),
+            RuleValue::Range([min, max]) => min.is_finite() && max.is_finite() && min <= max,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct IndicatorRule {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub condition: Option<String>,
     pub indicator: String,
     #[serde(default)]
     pub period: Option<usize>,
     pub operator: String,
-    pub value: f64,
+    pub value: RuleValue,
     pub action: String,
 }
 

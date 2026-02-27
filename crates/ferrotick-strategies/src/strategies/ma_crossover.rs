@@ -61,6 +61,7 @@ impl MovingAverageCrossoverStrategy {
             action,
             strength: strength.clamp(0.0, 1.0),
             reason: reason.into(),
+            strategy_name: self.name().to_string(),
         }
     }
 }

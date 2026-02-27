@@ -1,8 +1,12 @@
+use std::collections::VecDeque;
+
 use ferrotick_core::Bar;
 use ferrotick_ml::features::indicators::compute_rsi;
 
 use crate::traits::strategy::{Order, OrderSide, Signal, SignalAction, Strategy};
 use crate::{StrategyError, StrategyResult};
+
+const MAX_HISTORY: usize = 1000;
 
 #[derive(Debug, Clone)]
 pub struct RsiMeanReversionStrategy {
@@ -11,7 +15,7 @@ pub struct RsiMeanReversionStrategy {
     oversold: f64,
     overbought: f64,
     order_quantity: f64,
-    closes: Vec<f64>,
+    closes: VecDeque<f64>,
 }
 
 impl RsiMeanReversionStrategy {
@@ -46,7 +50,7 @@ impl RsiMeanReversionStrategy {
             oversold,
             overbought,
             order_quantity,
-            closes: Vec::new(),
+            closes: VecDeque::with_capacity(MAX_HISTORY),
         })
     }
 
@@ -63,6 +67,7 @@ impl RsiMeanReversionStrategy {
             action,
             strength: strength.clamp(0.0, 1.0),
             reason: reason.into(),
+            strategy_name: self.name().to_string(),
         }
     }
 }
@@ -73,11 +78,21 @@ impl Strategy for RsiMeanReversionStrategy {
     }
 
     fn on_bar(&mut self, bar: &Bar) -> Option<Signal> {
-        self.closes.push(bar.close);
+        self.closes.push_back(bar.close);
+
+        // Bound the history to prevent O(N²)
+        if self.closes.len() > MAX_HISTORY {
+            self.closes.pop_front();
+        }
+
         if self.closes.len() < self.period {
             return None;
         }
-        let rsi_series = match compute_rsi(&self.closes, self.period) {
+
+        // Use make_contiguous for compute_rsi
+        let closes: Vec<f64> = self.closes.make_contiguous().to_vec();
+
+        let rsi_series = match compute_rsi(&closes, self.period) {
             Ok(values) => values,
             Err(err) => {
                 return Some(self.signal(bar, SignalAction::Hold, 0.0, format!("rsi_error={err}")))

@@ -1,6 +1,6 @@
 use ferrotick_core::Bar;
 
-use crate::traits::strategy::{Signal, Strategy};
+use crate::traits::strategy::{Order, Signal, Strategy};
 
 pub struct SignalGenerator {
     strategies: Vec<Box<dyn Strategy>>,
@@ -22,6 +22,13 @@ impl SignalGenerator {
         self.strategies
             .iter_mut()
             .filter_map(|strategy| strategy.on_bar(bar))
+            .collect()
+    }
+
+    pub fn on_signal(&mut self, signal: &Signal) -> Vec<Order> {
+        self.strategies
+            .iter_mut()
+            .filter_map(|strategy| strategy.on_signal(signal))
             .collect()
     }
 

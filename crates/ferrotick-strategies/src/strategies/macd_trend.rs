@@ -1,8 +1,12 @@
+use std::collections::VecDeque;
+
 use ferrotick_core::Bar;
 use ferrotick_ml::features::indicators::compute_macd;
 
 use crate::traits::strategy::{Order, OrderSide, Signal, SignalAction, Strategy};
 use crate::{StrategyError, StrategyResult};
+
+const MAX_HISTORY: usize = 1000;
 
 #[derive(Debug, Clone)]
 pub struct MacdTrendStrategy {
@@ -11,7 +15,7 @@ pub struct MacdTrendStrategy {
     slow_period: usize,
     signal_period: usize,
     order_quantity: f64,
-    closes: Vec<f64>,
+    closes: VecDeque<f64>,
     prev_macd: Option<f64>,
     prev_signal: Option<f64>,
 }
@@ -45,7 +49,7 @@ impl MacdTrendStrategy {
             slow_period,
             signal_period,
             order_quantity,
-            closes: Vec::new(),
+            closes: VecDeque::with_capacity(MAX_HISTORY),
             prev_macd: None,
             prev_signal: None,
         })
@@ -64,6 +68,7 @@ impl MacdTrendStrategy {
             action,
             strength: strength.clamp(0.0, 1.0),
             reason: reason.into(),
+            strategy_name: self.name().to_string(),
         }
     }
 }
@@ -74,12 +79,22 @@ impl Strategy for MacdTrendStrategy {
     }
 
     fn on_bar(&mut self, bar: &Bar) -> Option<Signal> {
-        self.closes.push(bar.close);
-        if self.closes.len() < self.slow_period + self.signal_period {
+        self.closes.push_back(bar.close);
+
+        // Bound the history to prevent O(N²)
+        if self.closes.len() > MAX_HISTORY {
+            self.closes.pop_front();
+        }
+
+        if self.closes.len() < self.slow_period + self.signal_period - 1 {
             return None;
         }
+
+        // Use make_contiguous for compute_macd
+        let closes: Vec<f64> = self.closes.make_contiguous().to_vec();
+
         let macd_result = match compute_macd(
-            &self.closes,
+            &closes,
             self.fast_period,
             self.slow_period,
             self.signal_period,
