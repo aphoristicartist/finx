@@ -1,0 +1,22 @@
+[package]
+name = "ferrotick-ai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ferrotick-core = { path = "../ferrotick-core" }
+ferrotick-backtest = { path = "../ferrotick-backtest" }
+ferrotick-strategies = { path = "../ferrotick-strategies" }
+async-openai = "0.20"
+tokio.workspace = true
+serde = { version = "1.0", features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+regex = "1.10"
+async-trait = "0.1"
+serde_yaml = "0.9"
+
+[dev-dependencies]
+tokio-test = "0.4"
