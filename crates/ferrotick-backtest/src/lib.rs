@@ -3,6 +3,7 @@ pub mod engine;
 pub mod error;
 pub mod metrics;
 pub mod portfolio;
+pub mod vectorized;
 
 pub use costs::{FeeModel, SlippageModel, TransactionCosts};
 pub use engine::{
@@ -14,6 +15,7 @@ pub use metrics::{EquityPoint, MetricsReport, PerformanceMetrics};
 pub use portfolio::{
     CashLedger, Fill, Order, OrderSide, OrderStatus, OrderType, Portfolio, Position,
 };
+pub use vectorized::{ParamResult, VectorizedBacktest};
 
 /// Result type for backtesting operations.
 pub type BacktestResult<T> = Result<T, BacktestError>;

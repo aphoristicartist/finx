@@ -35,6 +35,12 @@ pub enum BacktestError {
     #[error("event bus is closed")]
     EventBusClosed,
 
+    #[error("engine error: {0}")]
+    EngineError(String),
+
+    #[error("unsupported strategy: {0}")]
+    UnsupportedStrategy(String),
+
     #[error(transparent)]
     Validation(#[from] ferrotick_core::ValidationError),
 
