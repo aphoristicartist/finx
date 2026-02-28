@@ -5,7 +5,11 @@ members = [
   "crates/ferrotick-warehouse",
   "crates/ferrotick-agent",
   "crates/ferrotick-ml",
-  "crates/ferrotick-backtest", "crates/ferrotick-optimization", "crates/ferrotick-ai",
+  "crates/ferrotick-backtest",
+  "crates/ferrotick-optimization",
+  "crates/ferrotick-ai",
+  "crates/ferrotick-strategies",
+  "crates/ferrotick-trading",
 ]
 resolver = "2"
 
