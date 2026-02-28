@@ -2,12 +2,12 @@
 //!
 //! Persists optimization results to disk for later analysis.
 
-use std::path::Path;
-use std::fs;
-use serde::{Deserialize, Serialize};
 use crate::grid_search::OptimizationReport;
 use crate::walk_forward::WalkForwardSummary;
 use crate::OptimizationResult;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
 
 /// Stored optimization run metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -9,16 +9,13 @@ use std::sync::Arc;
 use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
 use ferrotick_core::{
+    http_client::{HttpAuth, NoopHttpClient},
     AlpacaAdapter, AlphaVantageAdapter, BarsRequest, DataSource, FundamentalsRequest, Interval,
     PolygonAdapter, ProviderId, QuoteRequest, SearchRequest, SourceErrorKind, Symbol, YahooAdapter,
-    http_client::{HttpAuth, NoopHttpClient},
 };
 
 fn mock_polygon() -> PolygonAdapter {
-    PolygonAdapter::with_http_client(
-        Arc::new(NoopHttpClient::default()),
-        HttpAuth::None,
-    )
+    PolygonAdapter::with_http_client(Arc::new(NoopHttpClient::default()), HttpAuth::None)
 }
 
 fn mock_alpaca() -> AlpacaAdapter {
@@ -37,10 +34,7 @@ fn mock_alphavantage() -> AlphaVantageAdapter {
 }
 
 fn mock_yahoo() -> YahooAdapter {
-    YahooAdapter::with_http_client(
-        Arc::new(NoopHttpClient::default()),
-        HttpAuth::None,
-    )
+    YahooAdapter::with_http_client(Arc::new(NoopHttpClient::default()), HttpAuth::None)
 }
 
 #[derive(Clone)]

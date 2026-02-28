@@ -1,5 +1,5 @@
-use crate::{MlError, MlResult};
 use super::Dataset;
+use crate::{MlError, MlResult};
 
 /// Model performance metrics.
 #[derive(Debug, Clone)]
@@ -97,9 +97,11 @@ where
         };
 
         // Split into train and test
-        let (train_features, test_features) = split_features(&dataset.features, test_start, test_end);
+        let (train_features, test_features) =
+            split_features(&dataset.features, test_start, test_end);
         let (train_targets, test_targets) = split_targets(&dataset.targets, test_start, test_end);
-        let (train_timestamps, test_timestamps) = split_timestamps(&dataset.timestamps, test_start, test_end);
+        let (train_timestamps, test_timestamps) =
+            split_timestamps(&dataset.timestamps, test_start, test_end);
 
         let train_dataset = Dataset {
             feature_names: dataset.feature_names.clone(),
@@ -129,7 +131,11 @@ where
     Ok(metrics)
 }
 
-fn split_features(features: &ndarray::Array2<f64>, start: usize, end: usize) -> (ndarray::Array2<f64>, ndarray::Array2<f64>) {
+fn split_features(
+    features: &ndarray::Array2<f64>,
+    start: usize,
+    end: usize,
+) -> (ndarray::Array2<f64>, ndarray::Array2<f64>) {
     use ndarray::s;
 
     let before = features.slice(s![..start, ..]).to_owned();
@@ -141,7 +147,11 @@ fn split_features(features: &ndarray::Array2<f64>, start: usize, end: usize) -> 
     (train, test)
 }
 
-fn split_targets(targets: &ndarray::Array1<f64>, start: usize, end: usize) -> (ndarray::Array1<f64>, ndarray::Array1<f64>) {
+fn split_targets(
+    targets: &ndarray::Array1<f64>,
+    start: usize,
+    end: usize,
+) -> (ndarray::Array1<f64>, ndarray::Array1<f64>) {
     use ndarray::s;
 
     let before = targets.slice(s![..start]).to_owned();

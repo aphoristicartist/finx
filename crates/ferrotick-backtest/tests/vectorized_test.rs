@@ -5,7 +5,7 @@ use std::collections::HashMap;
 fn create_test_bars(n: usize) -> Vec<Bar> {
     (0..n)
         .map(|i| {
-            let day = (i % 28) + 1;  // Keep within valid days
+            let day = (i % 28) + 1; // Keep within valid days
             let ts_str = format!("2024-01-{:02}T09:30:00Z", day);
             Bar {
                 ts: UtcDateTime::parse(&ts_str).expect("valid timestamp"),
@@ -74,6 +74,8 @@ fn test_single_parameter_backtest() {
     assert_eq!(results.len(), 1);
     let result = &results[0];
     // Access metrics using methods
-    assert!(result.metrics.sharpe_ratio(0.02).is_finite() || result.metrics.sharpe_ratio(0.02) == 0.0);
+    assert!(
+        result.metrics.sharpe_ratio(0.02).is_finite() || result.metrics.sharpe_ratio(0.02) == 0.0
+    );
     assert!(result.metrics.max_drawdown() >= 0.0 && result.metrics.max_drawdown() <= 1.0);
 }

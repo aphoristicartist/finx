@@ -18,7 +18,6 @@ pub enum CacheMode {
     Bypass,
 }
 
-
 #[derive(Debug, Clone)]
 struct CacheEntry {
     body: String,
@@ -166,11 +165,15 @@ mod tests {
         assert!(cache.get("key1").await.is_none());
 
         // Put and get
-        cache.put("key1".to_string(), "value1".to_string(), None).await;
+        cache
+            .put("key1".to_string(), "value1".to_string(), None)
+            .await;
         assert_eq!(cache.get("key1").await, Some("value1".to_string()));
 
         // Overwrite
-        cache.put("key1".to_string(), "value2".to_string(), None).await;
+        cache
+            .put("key1".to_string(), "value2".to_string(), None)
+            .await;
         assert_eq!(cache.get("key1").await, Some("value2".to_string()));
     }
 
@@ -178,7 +181,9 @@ mod tests {
     async fn test_cache_expiration() {
         let cache = CacheStore::new(Duration::from_millis(100));
 
-        cache.put("key1".to_string(), "value1".to_string(), None).await;
+        cache
+            .put("key1".to_string(), "value1".to_string(), None)
+            .await;
         assert!(cache.get("key1").await.is_some());
 
         tokio::time::sleep(Duration::from_millis(150)).await;
@@ -208,8 +213,12 @@ mod tests {
     async fn test_cache_clear_expired() {
         let cache = CacheStore::new(Duration::from_millis(100));
 
-        cache.put("key1".to_string(), "value1".to_string(), None).await;
-        cache.put("key2".to_string(), "value2".to_string(), None).await;
+        cache
+            .put("key1".to_string(), "value1".to_string(), None)
+            .await;
+        cache
+            .put("key2".to_string(), "value2".to_string(), None)
+            .await;
 
         assert_eq!(cache.len().await, 2);
 
@@ -223,8 +232,12 @@ mod tests {
     async fn test_cache_clear_all() {
         let cache = CacheStore::new(Duration::from_secs(60));
 
-        cache.put("key1".to_string(), "value1".to_string(), None).await;
-        cache.put("key2".to_string(), "value2".to_string(), None).await;
+        cache
+            .put("key1".to_string(), "value1".to_string(), None)
+            .await;
+        cache
+            .put("key2".to_string(), "value2".to_string(), None)
+            .await;
 
         assert_eq!(cache.len().await, 2);
         cache.clear().await;
@@ -237,7 +250,9 @@ mod tests {
 
         assert!(cache.is_disabled().await);
 
-        cache.put("key1".to_string(), "value1".to_string(), None).await;
+        cache
+            .put("key1".to_string(), "value1".to_string(), None)
+            .await;
         assert!(cache.get("key1").await.is_none());
         assert_eq!(cache.len().await, 0);
     }

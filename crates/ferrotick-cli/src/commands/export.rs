@@ -9,15 +9,18 @@ use crate::error::CliError;
 use super::CommandResult;
 
 pub fn run(args: &ExportArgs) -> Result<CommandResult, CliError> {
-    let warehouse = Warehouse::open_default()
-        .map_err(|error| CliError::Command(error.to_string()))?;
+    let warehouse =
+        Warehouse::open_default().map_err(|error| CliError::Command(error.to_string()))?;
 
     // Default queries if table is specified
     let query = if let Some(table) = &args.table {
         match table.as_str() {
             "bars" | "bars_1d" | "bars_1m" => {
                 if let Some(symbol) = &args.symbol {
-                    format!("SELECT * FROM {} WHERE symbol = '{}' ORDER BY ts", table, symbol)
+                    format!(
+                        "SELECT * FROM {} WHERE symbol = '{}' ORDER BY ts",
+                        table, symbol
+                    )
                 } else {
                     format!("SELECT * FROM {} ORDER BY ts", table)
                 }
@@ -31,7 +34,10 @@ pub fn run(args: &ExportArgs) -> Result<CommandResult, CliError> {
             }
             "fundamentals" => {
                 if let Some(symbol) = &args.symbol {
-                    format!("SELECT * FROM fundamentals WHERE symbol = '{}' ORDER BY date", symbol)
+                    format!(
+                        "SELECT * FROM fundamentals WHERE symbol = '{}' ORDER BY date",
+                        symbol
+                    )
                 } else {
                     "SELECT * FROM fundamentals ORDER BY date".to_string()
                 }
@@ -44,12 +50,24 @@ pub fn run(args: &ExportArgs) -> Result<CommandResult, CliError> {
             }
         }
     } else {
-        args.query.clone().unwrap_or_else(|| "SELECT 1 LIMIT 0".to_string())
+        args.query
+            .clone()
+            .unwrap_or_else(|| "SELECT 1 LIMIT 0".to_string())
     };
 
     let guardrails = QueryGuardrails {
-        max_rows: args.max_rows.as_deref().unwrap_or("100000").parse::<usize>().unwrap_or(100000),
-        query_timeout_ms: args.query_timeout_ms.as_deref().unwrap_or("30000").parse::<u64>().unwrap_or(30000),
+        max_rows: args
+            .max_rows
+            .as_deref()
+            .unwrap_or("100000")
+            .parse::<usize>()
+            .unwrap_or(100000),
+        query_timeout_ms: args
+            .query_timeout_ms
+            .as_deref()
+            .unwrap_or("30000")
+            .parse::<u64>()
+            .unwrap_or(30000),
     };
 
     let result = warehouse
@@ -74,7 +92,9 @@ pub fn run(args: &ExportArgs) -> Result<CommandResult, CliError> {
             export_csv(&args.output, &result.columns, &result.rows)?;
         }
         "parquet" => {
-            eprintln!("ℹ Parquet export requires additional dependencies. Using CSV format instead.");
+            eprintln!(
+                "ℹ Parquet export requires additional dependencies. Using CSV format instead."
+            );
             export_csv(&args.output, &result.columns, &result.rows)?;
         }
         _ => {
@@ -102,18 +122,15 @@ fn export_csv(
     columns: &[ferrotick_core::SqlColumn],
     rows: &[Vec<serde_json::Value>],
 ) -> Result<(), CliError> {
-    use std::io::Write;
     use std::fs::File;
     use std::io::BufWriter;
+    use std::io::Write;
 
     let file = File::create(output_path)?;
     let mut writer = BufWriter::new(file);
 
     // Write header
-    let header: Vec<String> = columns
-        .iter()
-        .map(|c| c.name.clone())
-        .collect();
+    let header: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
     writeln!(writer, "{}", header.join(","))?;
 
     // Write rows

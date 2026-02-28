@@ -81,7 +81,14 @@ pub struct CapabilitySet {
 }
 
 impl CapabilitySet {
-    pub const fn new(quote: bool, bars: bool, fundamentals: bool, search: bool, financials: bool, earnings: bool) -> Self {
+    pub const fn new(
+        quote: bool,
+        bars: bool,
+        fundamentals: bool,
+        search: bool,
+        financials: bool,
+        earnings: bool,
+    ) -> Self {
         Self {
             quote,
             bars,
@@ -472,10 +479,10 @@ pub struct EarningsBatch {
 pub trait DataSource: Send + Sync {
     /// Returns the unique provider identifier.
     fn id(&self) -> ProviderId;
-    
+
     /// Returns the set of supported endpoints.
     fn capabilities(&self) -> CapabilitySet;
-    
+
     /// Fetches real-time or delayed quotes for the requested symbols.
     ///
     /// # Errors
@@ -489,7 +496,7 @@ pub trait DataSource: Send + Sync {
         &'a self,
         req: QuoteRequest,
     ) -> Pin<Box<dyn Future<Output = Result<QuoteBatch, SourceError>> + Send + 'a>>;
-    
+
     /// Fetches historical OHLCV bars.
     ///
     /// # Errors
@@ -502,7 +509,7 @@ pub trait DataSource: Send + Sync {
         &'a self,
         req: BarsRequest,
     ) -> Pin<Box<dyn Future<Output = Result<BarSeries, SourceError>> + Send + 'a>>;
-    
+
     /// Fetches company fundamentals.
     ///
     /// # Errors
@@ -515,7 +522,7 @@ pub trait DataSource: Send + Sync {
         &'a self,
         req: FundamentalsRequest,
     ) -> Pin<Box<dyn Future<Output = Result<FundamentalsBatch, SourceError>> + Send + 'a>>;
-    
+
     /// Searches for instruments matching a query.
     ///
     /// # Errors
@@ -528,7 +535,7 @@ pub trait DataSource: Send + Sync {
         &'a self,
         req: SearchRequest,
     ) -> Pin<Box<dyn Future<Output = Result<SearchBatch, SourceError>> + Send + 'a>>;
-    
+
     /// Fetches financial statements.
     ///
     /// # Errors
@@ -541,7 +548,7 @@ pub trait DataSource: Send + Sync {
         &'a self,
         req: FinancialsRequest,
     ) -> Pin<Box<dyn Future<Output = Result<FinancialsBatch, SourceError>> + Send + 'a>>;
-    
+
     /// Fetches earnings data.
     ///
     /// # Errors
@@ -554,7 +561,7 @@ pub trait DataSource: Send + Sync {
         &'a self,
         req: EarningsRequest,
     ) -> Pin<Box<dyn Future<Output = Result<EarningsBatch, SourceError>> + Send + 'a>>;
-    
+
     /// Returns the current health status of this source.
     ///
     /// Used by the router for source scoring and fallback decisions.

@@ -253,13 +253,11 @@ pub fn validate_stream(input: &str) -> Result<usize, StreamValidationError> {
         if line.trim().is_empty() {
             continue;
         }
-        let event: StreamEvent = serde_json::from_str(line).map_err(|e| {
-            StreamValidationError {
-                line_number: line_num + 1,
-                message: e.to_string(),
-            }
+        let event: StreamEvent = serde_json::from_str(line).map_err(|e| StreamValidationError {
+            line_number: line_num + 1,
+            message: e.to_string(),
         })?;
-        
+
         // Validate sequence is monotonically increasing
         if event.seq == 0 {
             return Err(StreamValidationError {
@@ -267,7 +265,7 @@ pub fn validate_stream(input: &str) -> Result<usize, StreamValidationError> {
                 message: "sequence number must be >= 1".to_string(),
             });
         }
-        
+
         // Validate error events have error payload
         if event.event == StreamEventType::Error && event.error.is_none() {
             return Err(StreamValidationError {
@@ -275,7 +273,7 @@ pub fn validate_stream(input: &str) -> Result<usize, StreamValidationError> {
                 message: "error events must have error payload".to_string(),
             });
         }
-        
+
         count += 1;
     }
     Ok(count)
@@ -292,7 +290,11 @@ pub struct StreamValidationError {
 
 impl std::fmt::Display for StreamValidationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "stream validation error at line {}: {}", self.line_number, self.message)
+        write!(
+            f,
+            "stream validation error at line {}: {}",
+            self.line_number, self.message
+        )
     }
 }
 
@@ -432,9 +434,13 @@ not valid json
 
         {
             let mut writer = NdjsonStreamWriter::new(&mut sink);
-            writer.emit_start(Some(serde_json::json!({ "count": event_count }))).unwrap();
+            writer
+                .emit_start(Some(serde_json::json!({ "count": event_count })))
+                .unwrap();
             for i in 0..event_count {
-                writer.emit_chunk(Some(serde_json::json!({ "idx": i }))).unwrap();
+                writer
+                    .emit_chunk(Some(serde_json::json!({ "idx": i })))
+                    .unwrap();
             }
             writer.emit_end(None).unwrap();
         }

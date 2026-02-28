@@ -47,8 +47,7 @@ impl RequestId {
 
     /// Parse a request ID from a string.
     pub fn parse(input: &str) -> Result<Self, ValidationError> {
-        let uuid = Uuid::parse_str(input)
-            .map_err(|_| ValidationError::InvalidRequestId)?;
+        let uuid = Uuid::parse_str(input).map_err(|_| ValidationError::InvalidRequestId)?;
         Ok(Self(uuid))
     }
 
@@ -206,10 +205,7 @@ impl AgentMetadata {
     }
 
     /// Convert to an EnvelopeMeta for use in envelopes.
-    pub fn into_envelope_meta(
-        self,
-        schema_version: &str,
-    ) -> Result<EnvelopeMeta, ValidationError> {
+    pub fn into_envelope_meta(self, schema_version: &str) -> Result<EnvelopeMeta, ValidationError> {
         let mut meta = EnvelopeMeta::new(
             self.request_id.to_string(),
             schema_version,
@@ -299,13 +295,7 @@ mod tests {
 
     #[test]
     fn metadata_requires_source_chain() {
-        let result = AgentMetadata::new(
-            RequestId::new_v4(),
-            TraceId::new(),
-            vec![],
-            100,
-            false,
-        );
+        let result = AgentMetadata::new(RequestId::new_v4(), TraceId::new(), vec![], 100, false);
         assert!(result.is_err());
     }
 

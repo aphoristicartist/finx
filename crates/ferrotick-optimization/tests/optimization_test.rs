@@ -1,8 +1,8 @@
 //! Integration tests for ferrotick-optimization.
 
-use ferrotick_optimization::*;
-use ferrotick_core::{Bar, Symbol, UtcDateTime};
 use ferrotick_backtest::{BacktestConfig, BarEvent, Portfolio, SignalEvent, Strategy};
+use ferrotick_core::{Bar, Symbol, UtcDateTime};
+use ferrotick_optimization::*;
 use std::collections::HashMap;
 
 /// Create test bars for optimization testing.
@@ -17,7 +17,8 @@ fn create_test_bars(n: usize) -> Vec<Bar> {
                 100.5 + (i as f64 * 0.1).sin() * 5.0,
                 Some(1000),
                 None,
-            ).unwrap()
+            )
+            .unwrap()
         })
         .collect()
 }
@@ -72,7 +73,9 @@ async fn test_grid_search_runs_backtests() {
     let bars = create_test_bars(50);
     let config = BacktestConfig::default();
 
-    let report = optimizer.optimize(test_strategy_factory, &bars, config).await;
+    let report = optimizer
+        .optimize(test_strategy_factory, &bars, config)
+        .await;
 
     // Should have tested 2 combinations (2 * 1)
     assert_eq!(report.combinations_tested, 2);
@@ -91,7 +94,9 @@ async fn test_walk_forward_splits_data() {
     optimizer.add_param("short_period", vec![10.0]);
 
     let config = BacktestConfig::default();
-    let summary = validator.validate(test_strategy_factory, &bars, &optimizer, config).await;
+    let summary = validator
+        .validate(test_strategy_factory, &bars, &optimizer, config)
+        .await;
 
     // Should have at least 1 window
     assert!(summary.window_count >= 1);

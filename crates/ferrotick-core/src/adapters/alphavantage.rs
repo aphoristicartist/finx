@@ -75,7 +75,9 @@ impl AlphaVantageAdapter {
 impl AlphaVantageAdapter {
     async fn fetch_real_quotes(&self, req: &QuoteRequest) -> Result<QuoteBatch, SourceError> {
         if !self.circuit_breaker.allow_request() {
-            return Err(SourceError::unavailable("alphavantage circuit breaker is open"));
+            return Err(SourceError::unavailable(
+                "alphavantage circuit breaker is open",
+            ));
         }
 
         let retry_delay = self.throttling.acquire().err();
@@ -112,11 +114,15 @@ impl AlphaVantageAdapter {
         self.circuit_breaker.record_success();
 
         // Parse Alpha Vantage response
-        let av_response: AlphaVantageQuoteResponse = serde_json::from_str(&response.body)
-            .map_err(|e| SourceError::internal(format!("failed to parse alphavantage response: {}", e)))?;
+        let av_response: AlphaVantageQuoteResponse =
+            serde_json::from_str(&response.body).map_err(|e| {
+                SourceError::internal(format!("failed to parse alphavantage response: {}", e))
+            })?;
 
         if av_response.quote.is_none() {
-            return Err(SourceError::unavailable("no quote data in alphavantage response"));
+            return Err(SourceError::unavailable(
+                "no quote data in alphavantage response",
+            ));
         }
 
         let quote_data = av_response.quote.unwrap();
@@ -133,12 +139,16 @@ impl AlphaVantageAdapter {
         )
         .map_err(|e| SourceError::internal(e.to_string()))?;
 
-        Ok(QuoteBatch { quotes: vec![quote] })
+        Ok(QuoteBatch {
+            quotes: vec![quote],
+        })
     }
 
     async fn fetch_real_bars(&self, req: &BarsRequest) -> Result<BarSeries, SourceError> {
         if !self.circuit_breaker.allow_request() {
-            return Err(SourceError::unavailable("alphavantage circuit breaker is open"));
+            return Err(SourceError::unavailable(
+                "alphavantage circuit breaker is open",
+            ));
         }
 
         let retry_delay = self.throttling.acquire().err();
@@ -183,17 +193,31 @@ impl AlphaVantageAdapter {
         self.circuit_breaker.record_success();
 
         let av_response: AlphaVantageTimeSeriesResponse = serde_json::from_str(&response.body)
-            .map_err(|e| SourceError::internal(format!("failed to parse alphavantage bars: {}", e)))?;
+            .map_err(|e| {
+                SourceError::internal(format!("failed to parse alphavantage bars: {}", e))
+            })?;
 
-        let time_series = av_response.get_time_series()
+        let time_series = av_response
+            .get_time_series()
             .ok_or_else(|| SourceError::internal("no time series data in response"))?;
 
         let mut bars = Vec::new();
         for (timestamp_str, bar_data) in time_series.into_iter().take(req.limit) {
             // Parse ISO timestamp like "2025-01-14 16:00:00"
-            let ts_offset = time::OffsetDateTime::parse(&timestamp_str, &time::format_description::well_known::Iso8601::DEFAULT)
-                .or_else(|_| time::OffsetDateTime::parse(&timestamp_str, &time::format_description::parse("[year]-[month]-[day] [hour]:[minute]:[second]").unwrap()))
-                .map_err(|e| SourceError::internal(format!("invalid timestamp: {}", e)))?;
+            let ts_offset = time::OffsetDateTime::parse(
+                &timestamp_str,
+                &time::format_description::well_known::Iso8601::DEFAULT,
+            )
+            .or_else(|_| {
+                time::OffsetDateTime::parse(
+                    &timestamp_str,
+                    &time::format_description::parse(
+                        "[year]-[month]-[day] [hour]:[minute]:[second]",
+                    )
+                    .unwrap(),
+                )
+            })
+            .map_err(|e| SourceError::internal(format!("invalid timestamp: {}", e)))?;
             let ts = UtcDateTime::from_offset_datetime(ts_offset)
                 .map_err(|e| SourceError::internal(format!("timestamp not UTC: {}", e)))?;
 
@@ -219,7 +243,9 @@ impl AlphaVantageAdapter {
         req: &FundamentalsRequest,
     ) -> Result<FundamentalsBatch, SourceError> {
         if !self.circuit_breaker.allow_request() {
-            return Err(SourceError::unavailable("alphavantage circuit breaker is open"));
+            return Err(SourceError::unavailable(
+                "alphavantage circuit breaker is open",
+            ));
         }
 
         let retry_delay = self.throttling.acquire().err();
@@ -243,7 +269,9 @@ impl AlphaVantageAdapter {
 
     async fn execute_real_search(&self, req: &SearchRequest) -> Result<SearchBatch, SourceError> {
         if !self.circuit_breaker.allow_request() {
-            return Err(SourceError::unavailable("alphavantage circuit breaker is open"));
+            return Err(SourceError::unavailable(
+                "alphavantage circuit breaker is open",
+            ));
         }
 
         let retry_delay = self.throttling.acquire().err();
@@ -278,8 +306,8 @@ impl AlphaVantageAdapter {
         self.throttling.complete_one();
         self.circuit_breaker.record_success();
 
-        let search_response: AlphaVantageSearchResponse =
-            serde_json::from_str(&response.body).map_err(|e| {
+        let search_response: AlphaVantageSearchResponse = serde_json::from_str(&response.body)
+            .map_err(|e| {
                 SourceError::internal(format!("failed to parse search response: {}", e))
             })?;
 
@@ -396,18 +424,32 @@ impl DataSource for AlphaVantageAdapter {
     fn financials<'a>(
         &'a self,
         _req: crate::data_source::FinancialsRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<crate::data_source::FinancialsBatch, SourceError>> + Send + 'a>> {
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<crate::data_source::FinancialsBatch, SourceError>>
+                + Send
+                + 'a,
+        >,
+    > {
         Box::pin(async move {
-            Err(SourceError::unsupported_endpoint(crate::data_source::Endpoint::Financials))
+            Err(SourceError::unsupported_endpoint(
+                crate::data_source::Endpoint::Financials,
+            ))
         })
     }
 
     fn earnings<'a>(
         &'a self,
         _req: crate::data_source::EarningsRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<crate::data_source::EarningsBatch, SourceError>> + Send + 'a>> {
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<crate::data_source::EarningsBatch, SourceError>> + Send + 'a,
+        >,
+    > {
         Box::pin(async move {
-            Err(SourceError::unsupported_endpoint(crate::data_source::Endpoint::Earnings))
+            Err(SourceError::unsupported_endpoint(
+                crate::data_source::Endpoint::Earnings,
+            ))
         })
     }
 
@@ -458,7 +500,9 @@ struct AlphaVantageTimeSeriesResponse {
 
 impl AlphaVantageTimeSeriesResponse {
     /// Extract time series data regardless of the field name
-    fn get_time_series(&self) -> Option<std::collections::BTreeMap<String, AlphaVantageTimeSeriesBar>> {
+    fn get_time_series(
+        &self,
+    ) -> Option<std::collections::BTreeMap<String, AlphaVantageTimeSeriesBar>> {
         // Look for any key that starts with "Time Series"
         for (key, value) in &self.time_series_data {
             if key.starts_with("Time Series") {

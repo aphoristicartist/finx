@@ -37,9 +37,7 @@ fn benchmark_parameter_sweep(c: &mut Criterion) {
     );
 
     c.bench_function("parameter_sweep_10x9", |b| {
-        b.iter(|| {
-            backtest.run_parameter_sweep("ma_crossover", black_box(param_grid.clone()))
-        })
+        b.iter(|| backtest.run_parameter_sweep("ma_crossover", black_box(param_grid.clone())))
     });
 }
 

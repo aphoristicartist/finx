@@ -1,4 +1,4 @@
-use ferrotick_ml::{SVMClassifier, Model};
+use ferrotick_ml::{Model, SVMClassifier};
 use ndarray::{Array1, Array2};
 
 #[test]
@@ -24,7 +24,7 @@ fn test_svm_basic() {
     // Predict using Model trait (batch prediction)
     let predictions = Model::predict(&svm, &features).expect("prediction failed");
     assert_eq!(predictions.len(), 100);
-    
+
     // Check that predictions are in expected range (-1 or 1)
     for pred in predictions.iter() {
         assert!(*pred == -1.0 || *pred == 1.0);

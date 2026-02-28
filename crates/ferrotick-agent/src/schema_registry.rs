@@ -121,7 +121,7 @@ impl SchemaRegistry {
     /// Create a schema registry with a custom schema directory.
     pub fn with_dir(schema_dir: impl AsRef<Path>) -> Result<Self, SchemaRegistryError> {
         let schema_dir = schema_dir.as_ref().to_path_buf();
-        
+
         if !schema_dir.exists() {
             return Err(SchemaRegistryError::DirectoryNotFound(
                 schema_dir.display().to_string(),
@@ -131,15 +131,17 @@ impl SchemaRegistry {
         let mut schemas = HashMap::new();
         Self::load_schemas(&schema_dir, &mut schemas)?;
 
-        Ok(Self { schema_dir, schemas })
+        Ok(Self {
+            schema_dir,
+            schemas,
+        })
     }
 
     fn load_schemas(
         dir: &Path,
         schemas: &mut HashMap<String, SchemaInfo>,
     ) -> Result<(), SchemaRegistryError> {
-        let entries = fs::read_dir(dir)
-            .map_err(|e| SchemaRegistryError::Io(e.to_string()))?;
+        let entries = fs::read_dir(dir).map_err(|e| SchemaRegistryError::Io(e.to_string()))?;
 
         for entry in entries {
             let entry = entry.map_err(|e| SchemaRegistryError::Io(e.to_string()))?;
@@ -149,17 +151,14 @@ impl SchemaRegistry {
                 continue;
             }
 
-            let file_name = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("");
+            let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
             if !file_name.ends_with(".json") {
                 continue;
             }
 
-            let content = fs::read_to_string(&path)
-                .map_err(|e| SchemaRegistryError::Io(e.to_string()))?;
+            let content =
+                fs::read_to_string(&path).map_err(|e| SchemaRegistryError::Io(e.to_string()))?;
 
             let schema: Value = serde_json::from_str(&content)
                 .map_err(|e| SchemaRegistryError::JsonParse(e.to_string()))?;
@@ -277,12 +276,10 @@ impl SchemaRegistry {
 /// This is a simplified validation that checks required fields and types.
 /// For full JSON Schema validation, consider using a dedicated library.
 pub fn validate_against_schema(value: &Value, schema: &Value) -> Result<(), SchemaValidationError> {
-    let schema_obj = schema
-        .as_object()
-        .ok_or_else(|| SchemaValidationError {
-            path: "$".to_string(),
-            message: "schema must be an object".to_string(),
-        })?;
+    let schema_obj = schema.as_object().ok_or_else(|| SchemaValidationError {
+        path: "$".to_string(),
+        message: "schema must be an object".to_string(),
+    })?;
 
     validate_value(value, schema_obj, "$")
 }
@@ -341,7 +338,11 @@ fn validate_value(
             if arr.len() < min as usize {
                 return Err(SchemaValidationError {
                     path: path.to_string(),
-                    message: format!("array must have at least {} items, found {}", min, arr.len()),
+                    message: format!(
+                        "array must have at least {} items, found {}",
+                        min,
+                        arr.len()
+                    ),
                 });
             }
         }
@@ -353,7 +354,11 @@ fn validate_value(
             if s.len() < min as usize {
                 return Err(SchemaValidationError {
                     path: path.to_string(),
-                    message: format!("string must have at least {} characters, found {}", min, s.len()),
+                    message: format!(
+                        "string must have at least {} characters, found {}",
+                        min,
+                        s.len()
+                    ),
                 });
             }
         }
@@ -365,7 +370,7 @@ fn validate_value(
             // Simple pattern check (just check if pattern exists in string for now)
             // For full regex support, use a dedicated regex library
             if pattern_str.starts_with('^') && pattern_str.ends_with('$') {
-                let inner = &pattern_str[1..pattern_str.len()-1];
+                let inner = &pattern_str[1..pattern_str.len() - 1];
                 if !s.contains(inner.trim_matches('\\')) {
                     // This is a simplified check - real JSON Schema pattern uses regex
                 }
@@ -376,7 +381,11 @@ fn validate_value(
     Ok(())
 }
 
-fn validate_type(value: &Value, schema_type: &Value, path: &str) -> Result<(), SchemaValidationError> {
+fn validate_type(
+    value: &Value,
+    schema_type: &Value,
+    path: &str,
+) -> Result<(), SchemaValidationError> {
     let type_str = schema_type.as_str().ok_or_else(|| SchemaValidationError {
         path: path.to_string(),
         message: "schema type must be a string".to_string(),
@@ -396,7 +405,11 @@ fn validate_type(value: &Value, schema_type: &Value, path: &str) -> Result<(), S
     if !matches {
         return Err(SchemaValidationError {
             path: path.to_string(),
-            message: format!("expected type '{}', found '{}'", type_str, value_type_name(value)),
+            message: format!(
+                "expected type '{}', found '{}'",
+                type_str,
+                value_type_name(value)
+            ),
         });
     }
 
@@ -423,10 +436,10 @@ mod tests {
         // Try multiple possible locations for the schema directory
         let candidates = [
             "schemas/v1",
-            "../../../schemas/v1",  // From target/debug/deps
-            "../../schemas/v1",     // From target/debug
+            "../../../schemas/v1", // From target/debug/deps
+            "../../schemas/v1",    // From target/debug
         ];
-        
+
         for candidate in &candidates {
             if let Ok(registry) = SchemaRegistry::with_dir(candidate) {
                 return Some(registry);
@@ -442,7 +455,7 @@ mod tests {
             None => return, // Skip if schema directory not found
         };
         let schemas = registry.list_schemas();
-        
+
         assert!(!schemas.is_empty());
         assert!(schemas.iter().any(|s| s.contains("envelope")));
         assert!(schemas.iter().any(|s| s.contains("stream")));
@@ -495,7 +508,7 @@ mod tests {
             None => return,
         };
         let schema = registry.get_schema_content("envelope").unwrap();
-        
+
         let value = json!({
             "meta": {
                 "request_id": "request-12345678",
@@ -519,7 +532,7 @@ mod tests {
             None => return,
         };
         let schema = registry.get_schema_content("envelope").unwrap();
-        
+
         let value = json!({
             "meta": {
                 // missing request_id
@@ -545,7 +558,7 @@ mod tests {
             None => return,
         };
         let schema = registry.get_schema_content("envelope").unwrap();
-        
+
         let value = json!({
             "meta": {
                 "request_id": "request-12345678",
@@ -569,7 +582,7 @@ mod tests {
             None => return,
         };
         let schema = registry.get_schema_content("envelope").unwrap();
-        
+
         let value = json!({
             "meta": {
                 "request_id": "request-12345678",
@@ -593,7 +606,7 @@ mod tests {
             None => return,
         };
         let schema = registry.get_schema_content("stream.event").unwrap();
-        
+
         let value = json!({
             "event": "start",
             "seq": 1,
@@ -612,7 +625,7 @@ mod tests {
             None => return,
         };
         let schema = registry.get_schema_content("stream.event").unwrap();
-        
+
         let value = json!({
             "event": "error",
             "seq": 1,

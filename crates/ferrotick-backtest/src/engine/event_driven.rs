@@ -162,18 +162,21 @@ impl BacktestEngine {
             if !self.pending_orders.is_empty() {
                 let orders_to_execute = std::mem::take(&mut self.pending_orders);
                 for order in orders_to_execute {
-                    let bar = self
-                        .latest_bars
-                        .get(&order.symbol)
-                        .ok_or_else(|| BacktestError::MissingBarForSymbol(order.symbol.to_string()))?;
+                    let bar = self.latest_bars.get(&order.symbol).ok_or_else(|| {
+                        BacktestError::MissingBarForSymbol(order.symbol.to_string())
+                    })?;
 
-                    if let Some(fill) = self.order_executor.execute(&order, bar, &self.config.costs)? {
+                    if let Some(fill) =
+                        self.order_executor
+                            .execute(&order, bar, &self.config.costs)?
+                    {
                         self.event_bus.publish(BacktestEvent::Fill(fill))?;
                     }
                 }
             }
 
-            self.event_bus.publish(BacktestEvent::Bar(bar_event.clone()))?;
+            self.event_bus
+                .publish(BacktestEvent::Bar(bar_event.clone()))?;
             self.process_event_queue(strategy)?;
 
             equity_curve.push(EquityPoint {
@@ -193,7 +196,10 @@ impl BacktestEngine {
                     .get(&order.symbol)
                     .ok_or_else(|| BacktestError::MissingBarForSymbol(order.symbol.to_string()))?;
 
-                if let Some(fill) = self.order_executor.execute(&order, bar, &self.config.costs)? {
+                if let Some(fill) = self
+                    .order_executor
+                    .execute(&order, bar, &self.config.costs)?
+                {
                     self.event_bus.publish(BacktestEvent::Fill(fill))?;
                 }
             }
@@ -225,12 +231,14 @@ impl BacktestEngine {
                 }
                 BacktestEvent::Order(order) => {
                     // Orders should now only come from pending_orders execution
-                    let bar = self
-                        .latest_bars
-                        .get(&order.symbol)
-                        .ok_or_else(|| BacktestError::MissingBarForSymbol(order.symbol.to_string()))?;
+                    let bar = self.latest_bars.get(&order.symbol).ok_or_else(|| {
+                        BacktestError::MissingBarForSymbol(order.symbol.to_string())
+                    })?;
 
-                    if let Some(fill) = self.order_executor.execute(&order, bar, &self.config.costs)? {
+                    if let Some(fill) =
+                        self.order_executor
+                            .execute(&order, bar, &self.config.costs)?
+                    {
                         self.event_bus.publish(BacktestEvent::Fill(fill))?;
                     }
                 }
@@ -284,7 +292,8 @@ impl BacktestEngine {
             )));
         }
 
-        if !self.config.trading_days_per_year.is_finite() || self.config.trading_days_per_year <= 0.0
+        if !self.config.trading_days_per_year.is_finite()
+            || self.config.trading_days_per_year <= 0.0
         {
             return Err(BacktestError::InvalidConfig(String::from(
                 "trading_days_per_year must be > 0",

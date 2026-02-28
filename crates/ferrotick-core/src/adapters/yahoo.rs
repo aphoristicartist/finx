@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 use serde::Deserialize;
@@ -72,7 +72,10 @@ impl YahooAuthManager {
     }
 
     /// Get current crumb for use in query parameters, refreshing if needed
-    pub async fn get_crumb(&self, http_client: &Arc<dyn HttpClient>) -> Result<String, SourceError> {
+    pub async fn get_crumb(
+        &self,
+        http_client: &Arc<dyn HttpClient>,
+    ) -> Result<String, SourceError> {
         // Return cached crumb if valid
         if self.is_auth_valid() {
             let crumb = self.crumb.lock().unwrap().clone();
@@ -92,7 +95,11 @@ impl YahooAuthManager {
     /// Refresh auth by fetching cookie and crumb from Yahoo
     async fn refresh_auth(&self, http_client: &Arc<dyn HttpClient>) -> Result<(), SourceError> {
         // Check if already refreshing
-        if self.refreshing.compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed).is_err() {
+        if self
+            .refreshing
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed)
+            .is_err()
+        {
             // Another thread is refreshing, wait a bit and check if done
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             if self.is_auth_valid() {
@@ -141,7 +148,9 @@ impl YahooAuthManager {
 
                     // Check for "Too Many Requests"
                     if body.to_lowercase().contains("too many requests") {
-                        return Err(SourceError::unavailable("Yahoo rate limited while fetching crumb"));
+                        return Err(SourceError::unavailable(
+                            "Yahoo rate limited while fetching crumb",
+                        ));
                     }
 
                     // Validate crumb (should not be too long, contain reasonable characters)
@@ -155,7 +164,9 @@ impl YahooAuthManager {
             }
         }
 
-        Err(SourceError::unavailable("failed to fetch Yahoo crumb from all endpoints"))
+        Err(SourceError::unavailable(
+            "failed to fetch Yahoo crumb from all endpoints",
+        ))
     }
 
     /// Invalidate cached auth (triggers refresh on next call)
@@ -328,7 +339,13 @@ impl DataSource for YahooAdapter {
     fn financials<'a>(
         &'a self,
         req: crate::data_source::FinancialsRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<crate::data_source::FinancialsBatch, SourceError>> + Send + 'a>> {
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<crate::data_source::FinancialsBatch, SourceError>>
+                + Send
+                + 'a,
+        >,
+    > {
         Box::pin(async move {
             if req.limit == 0 {
                 return Err(SourceError::invalid_request(
@@ -343,7 +360,11 @@ impl DataSource for YahooAdapter {
     fn earnings<'a>(
         &'a self,
         req: crate::data_source::EarningsRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<crate::data_source::EarningsBatch, SourceError>> + Send + 'a>> {
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<crate::data_source::EarningsBatch, SourceError>> + Send + 'a,
+        >,
+    > {
         Box::pin(async move {
             if req.limit == 0 {
                 return Err(SourceError::invalid_request(
@@ -433,8 +454,13 @@ impl YahooAdapter {
                 endpoint.to_string()
             };
 
-            let new_endpoint = format!("{}&crumb={}",
-                endpoint_with_crumb.split('&').take_while(|s| !s.starts_with("crumb=")).collect::<Vec<_>>().join("&"),
+            let new_endpoint = format!(
+                "{}&crumb={}",
+                endpoint_with_crumb
+                    .split('&')
+                    .take_while(|s| !s.starts_with("crumb="))
+                    .collect::<Vec<_>>()
+                    .join("&"),
                 urlencoding::encode(&crumb)
             );
 
@@ -536,7 +562,8 @@ impl YahooAdapter {
             urlencoding::encode(&crumb)
         );
 
-        self.fetch_bars_with_retry(&endpoint, &req.symbol, req.interval, req.limit).await
+        self.fetch_bars_with_retry(&endpoint, &req.symbol, req.interval, req.limit)
+            .await
     }
 
     /// Fetch bars with automatic auth retry on 401/429
@@ -570,8 +597,13 @@ impl YahooAdapter {
 
             let base_endpoint = endpoint.split("&crumb=").next().unwrap_or(endpoint);
 
-            let new_endpoint = format!("{}&crumb={}",
-                base_endpoint.split('&').take_while(|s| !s.starts_with("crumb=")).collect::<Vec<_>>().join("&"),
+            let new_endpoint = format!(
+                "{}&crumb={}",
+                base_endpoint
+                    .split('&')
+                    .take_while(|s| !s.starts_with("crumb="))
+                    .collect::<Vec<_>>()
+                    .join("&"),
                 urlencoding::encode(&crumb)
             );
 
@@ -681,7 +713,9 @@ impl YahooAdapter {
             let response = self.execute_fundamentals_request(&endpoint).await?;
 
             let summary_response: YahooQuoteSummaryResponse = serde_json::from_str(&response.body)
-                .map_err(|e| SourceError::internal(format!("failed to parse fundamentals: {}", e)))?;
+                .map_err(|e| {
+                    SourceError::internal(format!("failed to parse fundamentals: {}", e))
+                })?;
 
             if let Some(error) = &summary_response.quote_summary.error {
                 if !error.is_empty() {
@@ -704,30 +738,46 @@ impl YahooAdapter {
                 .price
                 .as_ref()
                 .and_then(|p| p.market_cap.as_ref().and_then(|v| v.to_option()))
-                .or_else(|| result.default_key_statistics.as_ref().and_then(|s| s.market_cap.as_ref().and_then(|v| v.to_option())));
+                .or_else(|| {
+                    result
+                        .default_key_statistics
+                        .as_ref()
+                        .and_then(|s| s.market_cap.as_ref().and_then(|v| v.to_option()))
+                });
 
             // Extract P/E ratio from summaryDetail or defaultKeyStatistics
             let pe_ratio = result
                 .summary_detail
                 .as_ref()
                 .and_then(|s| s.pe_ratio.as_ref().and_then(|v| v.to_option()))
-                .or_else(|| result.summary_detail.as_ref().and_then(|s| s.forward_pe.as_ref().and_then(|v| v.to_option())))
-                .or_else(|| result.default_key_statistics.as_ref().and_then(|s| s.pe_ratio.as_ref().and_then(|v| v.to_option())));
+                .or_else(|| {
+                    result
+                        .summary_detail
+                        .as_ref()
+                        .and_then(|s| s.forward_pe.as_ref().and_then(|v| v.to_option()))
+                })
+                .or_else(|| {
+                    result
+                        .default_key_statistics
+                        .as_ref()
+                        .and_then(|s| s.pe_ratio.as_ref().and_then(|v| v.to_option()))
+                });
 
             // Extract dividend yield
             let dividend_yield = result
                 .summary_detail
                 .as_ref()
                 .and_then(|s| s.dividend_yield.as_ref().and_then(|v| v.to_option()))
-                .or_else(|| result.default_key_statistics.as_ref().and_then(|s| s.dividend_yield.as_ref().and_then(|v| v.to_option())));
+                .or_else(|| {
+                    result
+                        .default_key_statistics
+                        .as_ref()
+                        .and_then(|s| s.dividend_yield.as_ref().and_then(|v| v.to_option()))
+                });
 
-            if let Ok(fundamental) = Fundamental::new(
-                symbol.clone(),
-                as_of,
-                market_cap,
-                pe_ratio,
-                dividend_yield,
-            ) {
+            if let Ok(fundamental) =
+                Fundamental::new(symbol.clone(), as_of, market_cap, pe_ratio, dividend_yield)
+            {
                 fundamentals.push(fundamental);
             }
         }
@@ -735,7 +785,10 @@ impl YahooAdapter {
         Ok(FundamentalsBatch { fundamentals })
     }
 
-    async fn execute_fundamentals_request(&self, endpoint: &str) -> Result<HttpResponse, SourceError> {
+    async fn execute_fundamentals_request(
+        &self,
+        endpoint: &str,
+    ) -> Result<HttpResponse, SourceError> {
         if !self.circuit_breaker.allow_request() {
             return Err(SourceError::unavailable("yahoo circuit breaker is open"));
         }
@@ -759,8 +812,13 @@ impl YahooAdapter {
 
             let base_endpoint = endpoint.split("&crumb=").next().unwrap_or(endpoint);
 
-            let new_endpoint = format!("{}&crumb={}",
-                base_endpoint.split('&').take_while(|s| !s.starts_with("crumb=")).collect::<Vec<_>>().join("&"),
+            let new_endpoint = format!(
+                "{}&crumb={}",
+                base_endpoint
+                    .split('&')
+                    .take_while(|s| !s.starts_with("crumb="))
+                    .collect::<Vec<_>>()
+                    .join("&"),
                 urlencoding::encode(&crumb)
             );
 
@@ -798,7 +856,8 @@ impl YahooAdapter {
             urlencoding::encode(&crumb)
         );
 
-        self.fetch_search_with_retry(&endpoint, &req.query, req.limit).await
+        self.fetch_search_with_retry(&endpoint, &req.query, req.limit)
+            .await
     }
 
     async fn fetch_search_with_retry(
@@ -830,8 +889,13 @@ impl YahooAdapter {
 
             let base_endpoint = endpoint.split("&crumb=").next().unwrap_or(endpoint);
 
-            let new_endpoint = format!("{}&crumb={}",
-                base_endpoint.split('&').take_while(|s| !s.starts_with("crumb=")).collect::<Vec<_>>().join("&"),
+            let new_endpoint = format!(
+                "{}&crumb={}",
+                base_endpoint
+                    .split('&')
+                    .take_while(|s| !s.starts_with("crumb="))
+                    .collect::<Vec<_>>()
+                    .join("&"),
                 urlencoding::encode(&crumb)
             );
 
@@ -868,9 +932,15 @@ impl YahooAdapter {
         self.parse_search_response(&response_body, query, limit)
     }
 
-    fn parse_search_response(&self, body: &str, query: &str, limit: usize) -> Result<SearchBatch, SourceError> {
-        let search_response: YahooSearchResponse = serde_json::from_str(body)
-            .map_err(|e| SourceError::internal(format!("failed to parse search response: {}", e)))?;
+    fn parse_search_response(
+        &self,
+        body: &str,
+        query: &str,
+        limit: usize,
+    ) -> Result<SearchBatch, SourceError> {
+        let search_response: YahooSearchResponse = serde_json::from_str(body).map_err(|e| {
+            SourceError::internal(format!("failed to parse search response: {}", e))
+        })?;
 
         let results = search_response
             .quotes
@@ -912,9 +982,13 @@ impl YahooAdapter {
 
         // Map statement type to Yahoo modules
         let modules = match req.statement_type {
-            crate::StatementType::Income => "incomeStatementHistory,incomeStatementHistoryQuarterly",
+            crate::StatementType::Income => {
+                "incomeStatementHistory,incomeStatementHistoryQuarterly"
+            }
             crate::StatementType::Balance => "balanceSheetHistory,balanceSheetHistoryQuarterly",
-            crate::StatementType::CashFlow => "cashflowStatementHistory,cashflowStatementHistoryQuarterly",
+            crate::StatementType::CashFlow => {
+                "cashflowStatementHistory,cashflowStatementHistoryQuarterly"
+            }
         };
 
         let endpoint = format!(
@@ -951,9 +1025,15 @@ impl YahooAdapter {
         match req.statement_type {
             crate::StatementType::Income => {
                 let history = if matches!(req.period, crate::FinancialPeriod::Annual) {
-                    result.income_statement_history.as_ref().map(|h| &h.income_statement_history)
+                    result
+                        .income_statement_history
+                        .as_ref()
+                        .map(|h| &h.income_statement_history)
                 } else {
-                    result.income_statement_history_quarterly.as_ref().map(|h| &h.income_statement_history)
+                    result
+                        .income_statement_history_quarterly
+                        .as_ref()
+                        .map(|h| &h.income_statement_history)
                 };
 
                 if let Some(history) = history {
@@ -1010,9 +1090,15 @@ impl YahooAdapter {
             }
             crate::StatementType::Balance => {
                 let history = if matches!(req.period, crate::FinancialPeriod::Annual) {
-                    result.balance_sheet_history.as_ref().map(|h| &h.balance_sheet_history)
+                    result
+                        .balance_sheet_history
+                        .as_ref()
+                        .map(|h| &h.balance_sheet_history)
                 } else {
-                    result.balance_sheet_history_quarterly.as_ref().map(|h| &h.balance_sheet_history)
+                    result
+                        .balance_sheet_history_quarterly
+                        .as_ref()
+                        .map(|h| &h.balance_sheet_history)
                 };
 
                 if let Some(history) = history {
@@ -1069,9 +1155,15 @@ impl YahooAdapter {
             }
             crate::StatementType::CashFlow => {
                 let history = if matches!(req.period, crate::FinancialPeriod::Annual) {
-                    result.cashflow_statement_history.as_ref().map(|h| &h.cashflow_statement_history)
+                    result
+                        .cashflow_statement_history
+                        .as_ref()
+                        .map(|h| &h.cashflow_statement_history)
                 } else {
-                    result.cashflow_statement_history_quarterly.as_ref().map(|h| &h.cashflow_statement_history)
+                    result
+                        .cashflow_statement_history_quarterly
+                        .as_ref()
+                        .map(|h| &h.cashflow_statement_history)
                 };
 
                 if let Some(history) = history {
@@ -1135,14 +1227,18 @@ impl YahooAdapter {
             "USD",
             as_of,
             line_items,
-        ).map_err(validation_to_error)?;
+        )
+        .map_err(validation_to_error)?;
 
         Ok(crate::data_source::FinancialsBatch {
             financials: vec![statement],
         })
     }
 
-    async fn execute_financials_request(&self, endpoint: &str) -> Result<HttpResponse, SourceError> {
+    async fn execute_financials_request(
+        &self,
+        endpoint: &str,
+    ) -> Result<HttpResponse, SourceError> {
         if !self.circuit_breaker.allow_request() {
             return Err(SourceError::unavailable("yahoo circuit breaker is open"));
         }
@@ -1162,8 +1258,13 @@ impl YahooAdapter {
             let crumb = self.auth_manager.get_crumb(&self.http_client).await?;
 
             let base_endpoint = endpoint.split("&crumb=").next().unwrap_or(endpoint);
-            let new_endpoint = format!("{}&crumb={}",
-                base_endpoint.split('&').take_while(|s| !s.starts_with("crumb=")).collect::<Vec<_>>().join("&"),
+            let new_endpoint = format!(
+                "{}&crumb={}",
+                base_endpoint
+                    .split('&')
+                    .take_while(|s| !s.starts_with("crumb="))
+                    .collect::<Vec<_>>()
+                    .join("&"),
                 urlencoding::encode(&crumb)
             );
 
@@ -1237,7 +1338,9 @@ impl YahooAdapter {
                     let fiscal_year = quarter.year.unwrap_or(as_of.year());
                     let fiscal_quarter = Some(quarter.quarter.unwrap_or(((i % 4) + 1) as i32));
 
-                    let surprise_percent = if let (Some(actual), Some(estimate)) = (quarter.actual, quarter.estimate) {
+                    let surprise_percent = if let (Some(actual), Some(estimate)) =
+                        (quarter.actual, quarter.estimate)
+                    {
                         if estimate != 0.0 {
                             Some(((actual - estimate) / estimate.abs()) * 100.0)
                         } else {
@@ -1263,12 +1366,8 @@ impl YahooAdapter {
             }
         }
 
-        let report = crate::EarningsReport::new(
-            req.symbol.clone(),
-            "USD",
-            as_of,
-            entries,
-        ).map_err(validation_to_error)?;
+        let report = crate::EarningsReport::new(req.symbol.clone(), "USD", as_of, entries)
+            .map_err(validation_to_error)?;
 
         Ok(crate::data_source::EarningsBatch { earnings: report })
     }
@@ -1628,12 +1727,16 @@ mod tests {
         for i in 0..3 {
             let error = block_on(adapter.quote(request.clone())).expect_err("call should fail");
             assert_eq!(error.kind(), SourceErrorKind::Unavailable);
-            
+
             // Debug: Check circuit breaker state after each failure
             let cb_state = adapter.circuit_breaker.state();
             let consecutive_failures = adapter.circuit_breaker.consecutive_failures();
-            println!("After failure {}: state={:?}, consecutive_failures={}", 
-                i + 1, cb_state, consecutive_failures);
+            println!(
+                "After failure {}: state={:?}, consecutive_failures={}",
+                i + 1,
+                cb_state,
+                consecutive_failures
+            );
         }
 
         let health = block_on(adapter.health());

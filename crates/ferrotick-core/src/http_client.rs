@@ -1,9 +1,9 @@
+use reqwest::cookie::Jar;
 use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use reqwest::cookie::Jar;
 
 /// Minimal HTTP method set needed by provider adapters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

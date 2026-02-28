@@ -57,7 +57,7 @@
 //!     // ... other fields
 //!     bid: None, ask: None, volume: None, currency: "USD".to_string(), as_of: "2024-01-01T00:00:00Z".to_string(),
 //! }];
-//! 
+//!
 //! // Safe: parameterized query prevents SQL injection
 //! warehouse.ingest_quotes("test", "req-001", &quotes, 100)?;
 //! # Ok::<(), ferrotick_warehouse::WarehouseError>(())
@@ -339,10 +339,7 @@ impl Warehouse {
     /// // Use connection for parameterized queries
     /// # Ok::<(), ferrotick_warehouse::WarehouseError>(())
     /// ```
-    pub fn acquire_connection(
-        &self,
-        mode: AccessMode,
-    ) -> Result<PooledConnection, WarehouseError> {
+    pub fn acquire_connection(&self, mode: AccessMode) -> Result<PooledConnection, WarehouseError> {
         self.manager.acquire(mode).map_err(WarehouseError::from)
     }
 
@@ -451,12 +448,7 @@ impl Warehouse {
                 )?;
 
                 // Use parameterized query for instruments insert
-                let params: [&dyn ToSql; 4] = [
-                    &row.symbol,
-                    &row.symbol,
-                    &row.currency,
-                    &source,
-                ];
+                let params: [&dyn ToSql; 4] = [&row.symbol, &row.symbol, &row.currency, &source];
                 connection.execute(
                     "INSERT OR IGNORE INTO instruments \
                      (symbol, name, exchange, currency, asset_class, is_active, source, updated_at) \
@@ -631,8 +623,12 @@ impl Warehouse {
             "cache-sync:{}:{}:{}:{}",
             partition.source, partition.dataset, partition.symbol, partition.partition_date
         );
-        let params: [&dyn ToSql; 4] =
-            [&request_id, &partition.symbol, &partition.source, &partition.dataset];
+        let params: [&dyn ToSql; 4] = [
+            &request_id,
+            &partition.symbol,
+            &partition.source,
+            &partition.dataset,
+        ];
         connection.execute(
             "INSERT INTO ingest_log \
              (request_id, symbol, source, dataset, status, latency_ms, timestamp) \
@@ -1040,17 +1036,15 @@ mod tests {
         // Test with potentially dangerous strings that would break non-parameterized queries
         // Using raw string to avoid quote escaping issues
         let dangerous_symbol = r#"AAPL'; DROP TABLE quotes_latest; --"#;
-        let quotes = vec![
-            QuoteRecord {
-                symbol: dangerous_symbol.to_string(),
-                price: 150.0,
-                bid: Some(149.5),
-                ask: Some(150.5),
-                volume: Some(1000),
-                currency: "USD".to_string(),
-                as_of: "2026-02-20T10:00:00Z".to_string(),
-            },
-        ];
+        let quotes = vec![QuoteRecord {
+            symbol: dangerous_symbol.to_string(),
+            price: 150.0,
+            bid: Some(149.5),
+            ask: Some(150.5),
+            volume: Some(1000),
+            currency: "USD".to_string(),
+            as_of: "2026-02-20T10:00:00Z".to_string(),
+        }];
 
         // This should succeed with parameterized queries
         warehouse
@@ -1088,17 +1082,15 @@ mod tests {
 
         // Test with potentially dangerous strings
         let dangerous_symbol = r#"MSFT'; DELETE FROM bars_1d; --"#;
-        let bars = vec![
-            BarRecord {
-                symbol: dangerous_symbol.to_string(),
-                ts: "2026-02-20T10:00:00Z".to_string(),
-                open: 300.0,
-                high: 305.0,
-                low: 299.0,
-                close: 303.0,
-                volume: Some(2000),
-            },
-        ];
+        let bars = vec![BarRecord {
+            symbol: dangerous_symbol.to_string(),
+            ts: "2026-02-20T10:00:00Z".to_string(),
+            open: 300.0,
+            high: 305.0,
+            low: 299.0,
+            close: 303.0,
+            volume: Some(2000),
+        }];
 
         warehouse
             .ingest_bars("test", "bars_1d", "req-002", &bars, 50)
@@ -1132,14 +1124,12 @@ mod tests {
         // Test with potentially dangerous strings
         let dangerous_symbol = r#"GOOG'); DROP TABLE fundamentals; --"#;
         let dangerous_metric = r#"pe_ratio"; DELETE FROM fundamentals; --"#;
-        let fundamentals = vec![
-            FundamentalRecord {
-                symbol: dangerous_symbol.to_string(),
-                metric: dangerous_metric.to_string(),
-                value: 25.5,
-                date: "2026-02-20T00:00:00Z".to_string(),
-            },
-        ];
+        let fundamentals = vec![FundamentalRecord {
+            symbol: dangerous_symbol.to_string(),
+            metric: dangerous_metric.to_string(),
+            value: 25.5,
+            date: "2026-02-20T00:00:00Z".to_string(),
+        }];
 
         warehouse
             .ingest_fundamentals("test", "req-003", &fundamentals, 25)
@@ -1155,7 +1145,10 @@ mod tests {
             .expect("query");
 
         assert_eq!(result.row_count, 1);
-        assert_eq!(result.rows[0][2], Value::Number(Number::from_f64(25.5).unwrap()));
+        assert_eq!(
+            result.rows[0][2],
+            Value::Number(Number::from_f64(25.5).unwrap())
+        );
     }
 
     #[test]

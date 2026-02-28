@@ -25,7 +25,11 @@ impl VectorizedBacktest {
 
     /// Load price data into DuckDB for columnar operations
     /// symbol parameter is stored alongside each bar for filtering/grouping
-    pub fn load_bars(&self, symbol: &str, bars: &[ferrotick_core::Bar]) -> Result<(), BacktestError> {
+    pub fn load_bars(
+        &self,
+        symbol: &str,
+        bars: &[ferrotick_core::Bar],
+    ) -> Result<(), BacktestError> {
         self.db
             .execute_batch(
                 "CREATE TABLE IF NOT EXISTS bars (
@@ -111,14 +115,8 @@ impl VectorizedBacktest {
     ) -> Result<Array1<i8>, BacktestError> {
         match strategy_type {
             "ma_crossover" => {
-                let short_period = params
-                    .get("short_period")
-                    .copied()
-                    .unwrap_or(10.0) as i64;
-                let long_period = params
-                    .get("long_period")
-                    .copied()
-                    .unwrap_or(30.0) as i64;
+                let short_period = params.get("short_period").copied().unwrap_or(10.0) as i64;
+                let long_period = params.get("long_period").copied().unwrap_or(30.0) as i64;
 
                 // Use DuckDB window functions for moving averages
                 let query = format!(
@@ -148,15 +146,16 @@ impl VectorizedBacktest {
                 );
 
                 // Execute query and extract signals
-                let mut stmt = self
-                    .db
-                    .prepare(&query)
-                    .map_err(|e| BacktestError::EngineError(format!("Failed to prepare signal query: {}", e)))?;
+                let mut stmt = self.db.prepare(&query).map_err(|e| {
+                    BacktestError::EngineError(format!("Failed to prepare signal query: {}", e))
+                })?;
 
                 let signal_rows: Result<Vec<i8>, _> = stmt
                     .query_map([], |row| row.get::<_, i8>(0))
                     .map(|iter| iter.collect())
-                    .map_err(|e| BacktestError::EngineError(format!("Failed to execute signal query: {}", e)))?;
+                    .map_err(|e| {
+                        BacktestError::EngineError(format!("Failed to execute signal query: {}", e))
+                    })?;
 
                 let signals = signal_rows.map_err(|e| {
                     BacktestError::EngineError(format!("Failed to read signals: {}", e))
@@ -164,7 +163,9 @@ impl VectorizedBacktest {
 
                 Ok(Array1::from_vec(signals))
             }
-            _ => Err(BacktestError::UnsupportedStrategy(strategy_type.to_string())),
+            _ => Err(BacktestError::UnsupportedStrategy(
+                strategy_type.to_string(),
+            )),
         }
     }
 
@@ -173,14 +174,19 @@ impl VectorizedBacktest {
         let mut stmt = self
             .db
             .prepare("SELECT close FROM bars ORDER BY ts")
-            .map_err(|e| BacktestError::EngineError(format!("Failed to prepare price query: {}", e)))?;
+            .map_err(|e| {
+                BacktestError::EngineError(format!("Failed to prepare price query: {}", e))
+            })?;
 
         let prices: Result<Vec<f64>, _> = stmt
             .query_map([], |row| row.get::<_, f64>(0))
             .map(|iter| iter.collect())
-            .map_err(|e| BacktestError::EngineError(format!("Failed to execute price query: {}", e)))?;
+            .map_err(|e| {
+                BacktestError::EngineError(format!("Failed to execute price query: {}", e))
+            })?;
 
-        let prices = prices.map_err(|e| BacktestError::EngineError(format!("Failed to read prices: {}", e)))?;
+        let prices = prices
+            .map_err(|e| BacktestError::EngineError(format!("Failed to read prices: {}", e)))?;
 
         if prices.is_empty() {
             return Ok(Array1::from_vec(vec![100_000.0]));
@@ -222,32 +228,42 @@ impl VectorizedBacktest {
         Ok(Array1::from_vec(equity))
     }
 
-    fn calculate_metrics(&self, equity_curve: &Array1<f64>) -> Result<PerformanceMetrics, BacktestError> {
+    fn calculate_metrics(
+        &self,
+        equity_curve: &Array1<f64>,
+    ) -> Result<PerformanceMetrics, BacktestError> {
         if equity_curve.len() < 2 {
             // Create a minimal EquityPoint slice for MetricsReport
-            let equity_points = vec![
-                crate::metrics::EquityPoint {
-                    ts: ferrotick_core::UtcDateTime::from_unix_timestamp(0).expect("valid timestamp"),
-                    equity: 100_000.0,
-                    cash: 100_000.0,
-                    position_value: 0.0,
-                }
-            ];
+            let equity_points = vec![crate::metrics::EquityPoint {
+                ts: ferrotick_core::UtcDateTime::from_unix_timestamp(0).expect("valid timestamp"),
+                equity: 100_000.0,
+                cash: 100_000.0,
+                position_value: 0.0,
+            }];
             return Ok(PerformanceMetrics::from_equity_curve(&equity_points, 252.0));
         }
 
         // Convert Array1 to Vec<f64>
         let equity_values: Vec<f64> = equity_curve.iter().copied().collect();
-        
+
         // Create EquityPoints from equity curve
         let equity_points: Vec<crate::metrics::EquityPoint> = equity_values
             .iter()
             .enumerate()
             .map(|(i, &equity)| crate::metrics::EquityPoint {
-                ts: ferrotick_core::UtcDateTime::from_unix_timestamp((i as i64) * 86400).expect("valid timestamp"),
+                ts: ferrotick_core::UtcDateTime::from_unix_timestamp((i as i64) * 86400)
+                    .expect("valid timestamp"),
                 equity,
-                cash: if equity == equity_values[0] { 100_000.0 } else { 0.0 },
-                position_value: if equity == equity_values[0] { 0.0 } else { equity },
+                cash: if equity == equity_values[0] {
+                    100_000.0
+                } else {
+                    0.0
+                },
+                position_value: if equity == equity_values[0] {
+                    0.0
+                } else {
+                    equity
+                },
             })
             .collect();
 
@@ -258,7 +274,7 @@ impl VectorizedBacktest {
         if equity_curve.is_empty() {
             return 0.0;
         }
-        
+
         let mut max_drawdown = 0.0;
         let mut peak = equity_curve[0];
 

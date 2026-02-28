@@ -4,8 +4,8 @@
 //! and query operations, focusing on user-visible outcomes.
 
 use ferrotick_warehouse::{
-    BarRecord, FundamentalRecord, QueryGuardrails, QuoteRecord,
-    Warehouse, WarehouseConfig, WarehouseError,
+    BarRecord, FundamentalRecord, QueryGuardrails, QuoteRecord, Warehouse, WarehouseConfig,
+    WarehouseError,
 };
 use std::fs;
 use std::time::Instant;
@@ -211,7 +211,10 @@ fn when_duplicate_quotes_are_ingested_system_handles_idempotently() {
         serde_json::Value::Number(n) => n.as_i64().unwrap_or(-1),
         _ => -1,
     };
-    assert_eq!(count, 1, "duplicate ingest should result in single row (idempotent)");
+    assert_eq!(
+        count, 1,
+        "duplicate ingest should result in single row (idempotent)"
+    );
 }
 
 #[test]
@@ -335,16 +338,15 @@ fn when_user_submits_empty_query_they_get_clear_error() {
     .expect("warehouse open");
 
     // When: User submits an empty query
-    let result = warehouse.execute_query(
-        "",
-        QueryGuardrails::default(),
-        false,
-    );
+    let result = warehouse.execute_query("", QueryGuardrails::default(), false);
 
     // Then: A clear error is returned
     let error = result.expect_err("empty query should error");
     let msg = error.to_string().to_lowercase();
-    assert!(msg.contains("empty") || msg.contains("reject"), "error should mention the issue");
+    assert!(
+        msg.contains("empty") || msg.contains("reject"),
+        "error should mention the issue"
+    );
 }
 
 // =============================================================================
@@ -653,8 +655,14 @@ fn when_data_is_ingested_audit_trail_is_maintained() {
         .expect("query ingest log");
 
     assert_eq!(result.row_count, 1, "ingest should be logged");
-    assert_eq!(result.rows[0][0], serde_json::Value::String("req-test-001".to_string()));
-    assert_eq!(result.rows[0][2], serde_json::Value::String("yahoo".to_string()));
+    assert_eq!(
+        result.rows[0][0],
+        serde_json::Value::String("req-test-001".to_string())
+    );
+    assert_eq!(
+        result.rows[0][2],
+        serde_json::Value::String("yahoo".to_string())
+    );
 }
 
 // =============================================================================
@@ -699,6 +707,12 @@ fn when_cache_sync_is_run_existing_partitions_are_registered() {
     let report = warehouse.sync_cache().expect("sync cache");
 
     // Then: Partitions are registered
-    assert!(report.scanned_partitions >= 1, "should scan at least one partition");
-    assert!(report.synced_partitions >= 1, "should sync at least one partition");
+    assert!(
+        report.scanned_partitions >= 1,
+        "should scan at least one partition"
+    );
+    assert!(
+        report.synced_partitions >= 1,
+        "should sync at least one partition"
+    );
 }

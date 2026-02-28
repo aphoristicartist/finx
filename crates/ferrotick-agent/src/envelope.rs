@@ -247,7 +247,10 @@ impl EnvelopeValidator {
             .get("cache_hit")
             .ok_or_else(|| SchemaValidationError::missing_field("meta.cache_hit"))?;
         if !cache_hit.is_boolean() {
-            return Err(SchemaValidationError::invalid_type("meta.cache_hit", "boolean"));
+            return Err(SchemaValidationError::invalid_type(
+                "meta.cache_hit",
+                "boolean",
+            ));
         }
 
         // trace_id: optional, 32 hex chars if present
@@ -313,7 +316,9 @@ fn is_valid_schema_version(value: &str) -> bool {
         return false;
     }
     [major, minor, patch].iter().all(|part| {
-        part.is_some_and(|segment| !segment.is_empty() && segment.chars().all(|ch| ch.is_ascii_digit()))
+        part.is_some_and(|segment| {
+            !segment.is_empty() && segment.chars().all(|ch| ch.is_ascii_digit())
+        })
     })
 }
 
@@ -371,10 +376,12 @@ impl From<serde_json::Error> for SchemaValidationError {
 /// - Using consistent key ordering
 /// - Formatting numbers without scientific notation
 /// - Ensuring deterministic array ordering
-pub fn to_deterministic_json<T: Serialize>(envelope: &Envelope<T>) -> Result<String, serde_json::Error> {
+pub fn to_deterministic_json<T: Serialize>(
+    envelope: &Envelope<T>,
+) -> Result<String, serde_json::Error> {
     // Convert to JSON value first
     let value = serde_json::to_value(envelope)?;
-    
+
     // Re-serialize with sorted keys (serde_json preserves insertion order by default)
     let json_str = serde_json::to_string(&value)?;
     Ok(json_str)

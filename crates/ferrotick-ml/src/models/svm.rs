@@ -2,8 +2,8 @@ use linfa::prelude::*;
 use linfa_svm::Svm;
 use ndarray::{Array1, Array2};
 
-use crate::{MlError, MlResult};
 use super::Model;
+use crate::{MlError, MlResult};
 
 /// SVM-based signal classifier.
 pub struct SVMClassifier {
@@ -35,15 +35,16 @@ impl SVMClassifier {
 
     /// Predict signal (true = buy, false = sell).
     pub fn predict(&self, features: &Array1<f64>) -> MlResult<bool> {
-        let model = self.model.as_ref().ok_or_else(|| {
-            MlError::Prediction(String::from("model not trained"))
-        })?;
+        let model = self
+            .model
+            .as_ref()
+            .ok_or_else(|| MlError::Prediction(String::from("model not trained")))?;
 
         // Create a dataset with dummy labels for prediction
         let dummy_labels = Array1::from_elem(features.len(), false);
         let features_2d = features.view().insert_axis(ndarray::Axis(0));
         let dataset = linfa::Dataset::new(features_2d.to_owned(), dummy_labels);
-        
+
         let prediction = model.predict(&dataset);
 
         Ok(prediction[0])
@@ -51,14 +52,15 @@ impl SVMClassifier {
 
     /// Batch predict for multiple samples.
     pub fn predict_batch(&self, features: &Array2<f64>) -> MlResult<Array1<bool>> {
-        let model = self.model.as_ref().ok_or_else(|| {
-            MlError::Prediction(String::from("model not trained"))
-        })?;
+        let model = self
+            .model
+            .as_ref()
+            .ok_or_else(|| MlError::Prediction(String::from("model not trained")))?;
 
         // Create a dataset with dummy labels for prediction
         let dummy_labels = Array1::from_elem(features.nrows(), false);
         let dataset = linfa::Dataset::new(features.clone(), dummy_labels);
-        
+
         let predictions = model.predict(&dataset);
         Ok(predictions)
     }
@@ -80,14 +82,15 @@ impl Model for SVMClassifier {
     }
 
     fn predict(&self, features: &Array2<f64>) -> MlResult<Array1<f64>> {
-        let model = self.model.as_ref().ok_or_else(|| {
-            MlError::Prediction(String::from("model not trained"))
-        })?;
+        let model = self
+            .model
+            .as_ref()
+            .ok_or_else(|| MlError::Prediction(String::from("model not trained")))?;
 
         // Create a dataset with dummy labels for prediction
         let dummy_labels = Array1::from_elem(features.nrows(), false);
         let dataset = linfa::Dataset::new(features.clone(), dummy_labels);
-        
+
         let bool_predictions = model.predict(&dataset);
         let predictions = bool_predictions.mapv(|b| if b { 1.0 } else { -1.0 });
         Ok(predictions)

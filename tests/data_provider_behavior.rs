@@ -9,19 +9,18 @@
 use ferrotick_core::{
     circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitState},
     data_source::{
-        BarsRequest, DataSource, Endpoint, FundamentalsRequest, HealthState,
-        QuoteRequest, SearchRequest, SourceErrorKind,
+        BarsRequest, DataSource, Endpoint, FundamentalsRequest, HealthState, QuoteRequest,
+        SearchRequest, SourceErrorKind,
     },
-    routing::{SourceRouter, SourceStrategy},
-    Interval, ProviderId, Symbol,
     http_client::{HttpAuth, NoopHttpClient},
-    YahooAdapter,
+    routing::{SourceRouter, SourceStrategy},
+    Interval, ProviderId, Symbol, YahooAdapter,
 };
 use std::sync::Arc;
 use std::time::Duration;
 
 mod test_helpers;
-use test_helpers::{mock_alpaca, mock_alphavantage, mock_polygon, mock_yahoo, mock_router};
+use test_helpers::{mock_alpaca, mock_alphavantage, mock_polygon, mock_router, mock_yahoo};
 
 // =============================================================================
 // Data Provider: Valid Response Handling (requires real API)
@@ -182,8 +181,8 @@ async fn when_circuit_breaker_is_open_requests_are_rejected_immediately() {
     let adapter = YahooAdapter::with_circuit_breaker(circuit_breaker, http_client, HttpAuth::None);
 
     // When: A request is made
-    let request = QuoteRequest::new(vec![Symbol::parse("AAPL").expect("valid")])
-        .expect("valid request");
+    let request =
+        QuoteRequest::new(vec![Symbol::parse("AAPL").expect("valid")]).expect("valid request");
     let result = adapter.quote(request).await;
 
     // Then: The request is rejected without waiting for timeout
@@ -306,7 +305,10 @@ async fn when_router_snapshots_provider_full_status_is_returned() {
         if let Some(snapshot) = router.snapshot(provider).await {
             // Then: Snapshot contains all status information
             assert_eq!(snapshot.id, provider);
-            assert!(snapshot.capabilities.supports(Endpoint::Quote) || snapshot.capabilities.supports(Endpoint::Bars));
+            assert!(
+                snapshot.capabilities.supports(Endpoint::Quote)
+                    || snapshot.capabilities.supports(Endpoint::Bars)
+            );
             assert!(matches!(
                 snapshot.health.state,
                 HealthState::Healthy | HealthState::Degraded | HealthState::Unhealthy
@@ -351,7 +353,10 @@ async fn when_primary_source_fails_system_attempts_secondary_sources() {
     ));
 
     // And: Errors from failed sources are preserved for debugging
-    assert!(!result.errors.is_empty(), "errors from failed sources should be recorded");
+    assert!(
+        !result.errors.is_empty(),
+        "errors from failed sources should be recorded"
+    );
 }
 
 #[tokio::test]

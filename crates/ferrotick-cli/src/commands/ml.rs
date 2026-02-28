@@ -45,18 +45,16 @@ async fn run_features(
         .map_err(|err| CliError::Command(err.to_string()))?;
 
     if bars.is_empty() {
-        return Ok(
-            CommandResult::ok(
-                serde_json::json!({
-                    "symbol": symbol.as_str(),
-                    "rows_computed": 0,
-                    "stored_rows": 0,
-                    "features": []
-                }),
-                source_chain,
-            )
-            .with_warning("no bars found in warehouse; run `ferrotick cache load <symbol>` first"),
-        );
+        return Ok(CommandResult::ok(
+            serde_json::json!({
+                "symbol": symbol.as_str(),
+                "rows_computed": 0,
+                "stored_rows": 0,
+                "features": []
+            }),
+            source_chain,
+        )
+        .with_warning("no bars found in warehouse; run `ferrotick cache load <symbol>` first"));
     }
 
     let mut config = FeatureConfig::default();
@@ -95,8 +93,7 @@ async fn run_export(
 
     let start = parse_optional_cli_date(args.start.as_deref(), false)?
         .unwrap_or(UtcDateTime::parse("1970-01-01T00:00:00Z")?);
-    let end = parse_optional_cli_date(args.end.as_deref(), true)?
-        .unwrap_or(UtcDateTime::now());
+    let end = parse_optional_cli_date(args.end.as_deref(), true)?.unwrap_or(UtcDateTime::now());
 
     validate_range(Some(start), Some(end))?;
 

@@ -97,8 +97,8 @@ pub fn compute_atr(bars: &[Bar], period: usize) -> MlResult<Vec<Option<f64>>> {
         )));
     }
 
-    let mut indicator = AverageTrueRange::new(period)
-        .map_err(|err| MlError::InvalidConfig(err.to_string()))?;
+    let mut indicator =
+        AverageTrueRange::new(period).map_err(|err| MlError::InvalidConfig(err.to_string()))?;
 
     let mut output = Vec::with_capacity(bars.len());
     for (index, bar) in bars.iter().enumerate() {
