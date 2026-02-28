@@ -1,0 +1,19 @@
+[package]
+name = "ferrotick-web"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ferrotick-core = { path = "../ferrotick-core" }
+ferrotick-backtest = { path = "../ferrotick-backtest" }
+ferrotick-strategies = { path = "../ferrotick-strategies" }
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.5", features = ["cors", "fs"] }
+thiserror = "2.0"
+
+[dev-dependencies]
+reqwest = { version = "0.11", features = ["json"] }
