@@ -112,18 +112,19 @@ impl AlpacaAdapter {
         self.circuit_breaker.record_success();
 
         // Parse Alpaca response
-        let alpaca_response: AlpacaQuotesResponse = serde_json::from_str(&response.body)
-            .map_err(|e| SourceError::internal(format!("failed to parse alpaca response: {}", e)))?;
+        let alpaca_response: AlpacaQuotesResponse =
+            serde_json::from_str(&response.body).map_err(|e| {
+                SourceError::internal(format!("failed to parse alpaca response: {}", e))
+            })?;
 
         let quotes = alpaca_response
             .quotes
             .into_iter()
             .filter_map(|(symbol_str, quote)| {
                 let symbol = Symbol::parse(&symbol_str).ok()?;
-                let ts_offset = time::OffsetDateTime::from_unix_timestamp(
-                    quote.timestamp.parse().ok()?,
-                )
-                .ok()?;
+                let ts_offset =
+                    time::OffsetDateTime::from_unix_timestamp(quote.timestamp.parse().ok()?)
+                        .ok()?;
                 let ts = UtcDateTime::from_offset_datetime(ts_offset).ok()?;
 
                 Quote::new(
@@ -162,7 +163,14 @@ impl AlpacaAdapter {
             "https://data.alpaca.markets/v2/stocks/{}/bars?timeframe={}&start={}&limit={}",
             req.symbol.as_str(),
             timeframe,
-            start.format(&time::format_description::parse("[year]-[month]-[day]T[hour]:[minute]:[second]Z").unwrap()).unwrap(),
+            start
+                .format(
+                    &time::format_description::parse(
+                        "[year]-[month]-[day]T[hour]:[minute]:[second]Z"
+                    )
+                    .unwrap()
+                )
+                .unwrap(),
             req.limit
         );
 
@@ -278,18 +286,32 @@ impl DataSource for AlpacaAdapter {
     fn financials<'a>(
         &'a self,
         _req: crate::data_source::FinancialsRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<crate::data_source::FinancialsBatch, SourceError>> + Send + 'a>> {
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<crate::data_source::FinancialsBatch, SourceError>>
+                + Send
+                + 'a,
+        >,
+    > {
         Box::pin(async move {
-            Err(SourceError::unsupported_endpoint(crate::data_source::Endpoint::Financials))
+            Err(SourceError::unsupported_endpoint(
+                crate::data_source::Endpoint::Financials,
+            ))
         })
     }
 
     fn earnings<'a>(
         &'a self,
         _req: crate::data_source::EarningsRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<crate::data_source::EarningsBatch, SourceError>> + Send + 'a>> {
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<crate::data_source::EarningsBatch, SourceError>> + Send + 'a,
+        >,
+    > {
         Box::pin(async move {
-            Err(SourceError::unsupported_endpoint(crate::data_source::Endpoint::Earnings))
+            Err(SourceError::unsupported_endpoint(
+                crate::data_source::Endpoint::Earnings,
+            ))
         })
     }
 

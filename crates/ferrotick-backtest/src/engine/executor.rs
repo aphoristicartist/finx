@@ -42,7 +42,7 @@ impl OrderExecutor {
         }
 
         let reference_price = self.reference_price(order, bar)?;
-        
+
         // Get the base execution price from slippage (uses close for market orders)
         let base_execution_price = self
             .slippage
@@ -101,7 +101,7 @@ impl OrderExecutor {
             OrderType::Market => Ok(base_execution_price),
             OrderType::Limit => {
                 let limit = order.limit_price.ok_or(BacktestError::MissingLimitPrice)?;
-                
+
                 match order.side {
                     crate::portfolio::OrderSide::Buy => {
                         // Buy limit: fill price must be <= limit_price
@@ -117,7 +117,7 @@ impl OrderExecutor {
             }
             OrderType::Stop => {
                 let stop = order.stop_price.ok_or(BacktestError::MissingStopPrice)?;
-                
+
                 match order.side {
                     crate::portfolio::OrderSide::Buy => {
                         // Buy stop: triggers when price goes above stop

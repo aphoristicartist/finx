@@ -2,11 +2,11 @@
 //!
 //! Prevents overfitting by testing parameters on out-of-sample data.
 
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
-use ferrotick_core::{Bar, Symbol};
-use ferrotick_backtest::{BacktestConfig, BacktestEngine, BacktestReport, BarEvent, Strategy};
 use crate::grid_search::GridSearchOptimizer;
+use ferrotick_backtest::{BacktestConfig, BacktestEngine, BacktestReport, BarEvent, Strategy};
+use ferrotick_core::{Bar, Symbol};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Result of a single walk-forward window.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,7 +102,10 @@ impl WalkForwardValidator {
         let total_bars = bars.len();
         let in_sample_len = (total_bars as f64 * self.in_sample_pct) as usize;
         let out_sample_len = (total_bars as f64 * self.out_sample_pct) as usize;
-        let step_len = self.step_pct.map(|s| (total_bars as f64 * s) as usize).unwrap_or(out_sample_len);
+        let step_len = self
+            .step_pct
+            .map(|s| (total_bars as f64 * s) as usize)
+            .unwrap_or(out_sample_len);
 
         if in_sample_len == 0 || out_sample_len == 0 {
             return WalkForwardSummary {
@@ -128,7 +131,12 @@ impl WalkForwardValidator {
             // Test on out-of-sample data
             let out_sample_bars = &bars[in_sample_end..out_sample_end];
             let test_metrics = self
-                .run_backtest(&strategy_factory, &opt_report.best_params, out_sample_bars, &config)
+                .run_backtest(
+                    &strategy_factory,
+                    &opt_report.best_params,
+                    out_sample_bars,
+                    &config,
+                )
                 .await;
 
             windows.push(WalkForwardWindow {

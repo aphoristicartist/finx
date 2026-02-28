@@ -13,10 +13,7 @@ use ferrotick_core::{
 
 /// Create a PolygonAdapter with NoopHttpClient for testing.
 pub fn mock_polygon() -> PolygonAdapter {
-    PolygonAdapter::with_http_client(
-        Arc::new(NoopHttpClient::default()),
-        HttpAuth::None,
-    )
+    PolygonAdapter::with_http_client(Arc::new(NoopHttpClient::default()), HttpAuth::None)
 }
 
 /// Create an AlpacaAdapter with NoopHttpClient for testing.
@@ -38,17 +35,17 @@ pub fn mock_alphavantage() -> AlphaVantageAdapter {
 
 /// Create a YahooAdapter with NoopHttpClient for testing.
 pub fn mock_yahoo() -> YahooAdapter {
-    YahooAdapter::with_http_client(
-        Arc::new(NoopHttpClient::default()),
-        HttpAuth::None,
-    )
+    YahooAdapter::with_http_client(Arc::new(NoopHttpClient::default()), HttpAuth::None)
 }
 
 /// Create a SourceRouter with all adapters using NoopHttpClient.
 pub fn mock_router() -> SourceRouter {
     let http_client = Arc::new(NoopHttpClient::default());
     SourceRouter::new(vec![
-        Arc::new(PolygonAdapter::with_http_client(http_client.clone(), HttpAuth::None)),
+        Arc::new(PolygonAdapter::with_http_client(
+            http_client.clone(),
+            HttpAuth::None,
+        )),
         Arc::new(AlpacaAdapter::with_http_client(
             http_client.clone(),
             "test-key".to_string(),
@@ -58,6 +55,9 @@ pub fn mock_router() -> SourceRouter {
             http_client.clone(),
             "test-key".to_string(),
         )),
-        Arc::new(YahooAdapter::with_http_client(http_client.clone(), HttpAuth::None)),
+        Arc::new(YahooAdapter::with_http_client(
+            http_client.clone(),
+            HttpAuth::None,
+        )),
     ])
 }

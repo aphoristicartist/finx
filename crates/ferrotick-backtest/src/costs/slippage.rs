@@ -8,7 +8,9 @@ use crate::portfolio::OrderSide;
 #[serde(tag = "model", rename_all = "snake_case")]
 pub enum SlippageModel {
     None,
-    FixedBps { bps: f64 },
+    FixedBps {
+        bps: f64,
+    },
     VolumeShare {
         max_volume_share: f64,
         max_impact_bps: f64,

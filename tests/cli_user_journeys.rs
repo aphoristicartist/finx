@@ -33,16 +33,29 @@ async fn user_can_lookup_single_stock_quote_and_receives_valid_data() {
         .expect("quote lookup should succeed");
 
     // Then: They receive a valid quote with expected fields
-    assert!(!result.data.quotes.is_empty(), "should return at least one quote");
+    assert!(
+        !result.data.quotes.is_empty(),
+        "should return at least one quote"
+    );
 
     let quote = &result.data.quotes[0];
-    assert_eq!(quote.symbol.as_str(), "AAPL", "quote symbol should match requested symbol");
+    assert_eq!(
+        quote.symbol.as_str(),
+        "AAPL",
+        "quote symbol should match requested symbol"
+    );
     assert!(quote.price > 0.0, "price should be positive");
     assert!(!quote.currency.is_empty(), "currency should be present");
-    assert!(quote.as_of.into_inner().unix_timestamp() > 0, "timestamp should be valid");
+    assert!(
+        quote.as_of.into_inner().unix_timestamp() > 0,
+        "timestamp should be valid"
+    );
 
     // And: The user knows which data source was used
-    assert!(!result.source_chain.is_empty(), "source chain should be recorded");
+    assert!(
+        !result.source_chain.is_empty(),
+        "source chain should be recorded"
+    );
     assert!(matches!(
         result.selected_source,
         ProviderId::Polygon | ProviderId::Alpaca | ProviderId::Yahoo | ProviderId::Alphavantage
@@ -77,14 +90,26 @@ async fn user_can_lookup_multiple_stocks_in_single_request() {
         .map(|q| q.symbol.as_str())
         .collect();
 
-    assert!(symbols_returned.contains(&"AAPL"), "should include AAPL quote");
-    assert!(symbols_returned.contains(&"MSFT"), "should include MSFT quote");
-    assert!(symbols_returned.contains(&"GOOGL"), "should include GOOGL quote");
+    assert!(
+        symbols_returned.contains(&"AAPL"),
+        "should include AAPL quote"
+    );
+    assert!(
+        symbols_returned.contains(&"MSFT"),
+        "should include MSFT quote"
+    );
+    assert!(
+        symbols_returned.contains(&"GOOGL"),
+        "should include GOOGL quote"
+    );
 
     // And: Each quote has valid market data
     for quote in &result.data.quotes {
         assert!(quote.price > 0.0, "all prices should be positive");
-        assert!(!quote.currency.is_empty(), "all quotes should have currency");
+        assert!(
+            !quote.currency.is_empty(),
+            "all quotes should have currency"
+        );
     }
 }
 
@@ -102,14 +127,16 @@ async fn user_can_search_for_stocks_by_partial_name() {
         .expect("search should succeed");
 
     // Then: They receive matching instruments
-    assert!(!result.data.results.is_empty(), "should return search results");
+    assert!(
+        !result.data.results.is_empty(),
+        "should return search results"
+    );
 
     // And: At least one result matches the query
-    let has_apple_match = result
-        .data
-        .results
-        .iter()
-        .any(|inst| inst.name.to_lowercase().contains("apple") || inst.symbol.as_str() == "AAPL");
+    let has_apple_match =
+        result.data.results.iter().any(|inst| {
+            inst.name.to_lowercase().contains("apple") || inst.symbol.as_str() == "AAPL"
+        });
     assert!(has_apple_match, "should find Apple-related instruments");
 
     // And: Results are limited to the requested amount
@@ -132,7 +159,10 @@ async fn user_can_fetch_historical_daily_bars_for_analysis() {
     let request = BarsRequest::new(symbol, Interval::OneDay, 30).expect("valid bars request");
 
     // When: They request the historical bars
-    let bars = adapter.bars(request).await.expect("bars request should succeed");
+    let bars = adapter
+        .bars(request)
+        .await
+        .expect("bars request should succeed");
 
     // Then: They receive exactly the number of bars requested
     assert_eq!(bars.bars.len(), 30, "should return exactly 30 bars");
@@ -171,13 +201,18 @@ async fn user_can_fetch_intraday_bars_for_different_intervals() {
     ] {
         let request = BarsRequest::new(symbol.clone(), interval, 10).expect("valid request");
 
-        let bars = adapter.bars(request).await.unwrap_or_else(|_| {
-            panic!("bars request for {:?} should succeed", interval)
-        });
+        let bars = adapter
+            .bars(request)
+            .await
+            .unwrap_or_else(|_| panic!("bars request for {:?} should succeed", interval));
 
         // Then: Each interval type returns valid data
         assert_eq!(bars.interval, interval, "interval should match request");
-        assert!(!bars.bars.is_empty(), "should return bars for {:?}", interval);
+        assert!(
+            !bars.bars.is_empty(),
+            "should return bars for {:?}",
+            interval
+        );
     }
 }
 
@@ -425,8 +460,14 @@ async fn user_sees_which_sources_were_tried_on_failure() {
 
     // Then: The error includes which sources were attempted
     let failure = result.expect_err("should fail in strict mode with rate limit");
-    assert!(!failure.source_chain.is_empty(), "should record attempted sources");
-    assert!(!failure.errors.is_empty(), "should record errors from each source");
+    assert!(
+        !failure.source_chain.is_empty(),
+        "should record attempted sources"
+    );
+    assert!(
+        !failure.errors.is_empty(),
+        "should record errors from each source"
+    );
 }
 
 // =============================================================================
@@ -454,7 +495,11 @@ async fn user_receives_fresh_timestamps_with_quotes() {
 
     // Timestamp should be within the last minute (fresh data)
     let diff = (now - quote_ts).abs();
-    assert!(diff < 60, "quote timestamp should be recent (within 60s), got diff of {}s", diff);
+    assert!(
+        diff < 60,
+        "quote timestamp should be recent (within 60s), got diff of {}s",
+        diff
+    );
 }
 
 #[tokio::test]

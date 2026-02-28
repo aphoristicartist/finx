@@ -1,6 +1,9 @@
 use serde::Serialize;
 
-use ferrotick_core::{FinancialPeriod, FinancialsBatch, FinancialsRequest, SourceRouter, SourceStrategy, StatementType, Symbol};
+use ferrotick_core::{
+    FinancialPeriod, FinancialsBatch, FinancialsRequest, SourceRouter, SourceStrategy,
+    StatementType, Symbol,
+};
 
 use crate::cli::FinancialsArgs;
 use crate::error::CliError;
@@ -23,13 +26,23 @@ pub async fn run(
         "income" => StatementType::Income,
         "balance" => StatementType::Balance,
         "cashflow" | "cash-flow" | "cash_flow" => StatementType::CashFlow,
-        _ => return Err(CliError::Command(format!("invalid statement type: {}", args.statement))),
+        _ => {
+            return Err(CliError::Command(format!(
+                "invalid statement type: {}",
+                args.statement
+            )))
+        }
     };
 
     let period = match args.period.to_lowercase().as_str() {
         "annual" => FinancialPeriod::Annual,
         "quarterly" | "quarter" => FinancialPeriod::Quarterly,
-        _ => return Err(CliError::Command(format!("invalid period: {}", args.period))),
+        _ => {
+            return Err(CliError::Command(format!(
+                "invalid period: {}",
+                args.period
+            )))
+        }
     };
 
     let request = FinancialsRequest::new(symbol, statement_type, period, args.limit)

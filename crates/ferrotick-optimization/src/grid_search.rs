@@ -2,10 +2,10 @@
 //!
 //! Performs exhaustive search over parameter space to find optimal configuration.
 
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
-use ferrotick_core::{Bar, Symbol};
 use ferrotick_backtest::{BacktestConfig, BacktestEngine, BacktestReport, BarEvent, Strategy};
+use ferrotick_core::{Bar, Symbol};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// A range of values for a single parameter.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,7 +70,13 @@ impl GridSearchOptimizer {
     }
 
     /// Add a parameter range with linear spacing.
-    pub fn add_param_range(&mut self, name: impl Into<String>, start: f64, end: f64, steps: usize) -> &mut Self {
+    pub fn add_param_range(
+        &mut self,
+        name: impl Into<String>,
+        start: f64,
+        end: f64,
+        steps: usize,
+    ) -> &mut Self {
         let values: Vec<f64> = (0..steps)
             .map(|i| start + (end - start) * (i as f64) / ((steps - 1).max(1) as f64))
             .collect();

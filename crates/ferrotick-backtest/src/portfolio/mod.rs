@@ -77,7 +77,10 @@ impl Portfolio {
                 .or_insert_with(|| Position::new(symbol.clone()));
             let realized_before = position.realized_pnl();
             position.apply_fill(fill)?;
-            (position.realized_pnl() - realized_before, position.is_flat())
+            (
+                position.realized_pnl() - realized_before,
+                position.is_flat(),
+            )
         };
 
         if became_flat {

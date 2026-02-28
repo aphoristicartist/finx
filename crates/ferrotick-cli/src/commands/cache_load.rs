@@ -15,13 +15,17 @@ pub async fn run(
     router: &SourceRouter,
     strategy: SourceStrategy,
 ) -> Result<CommandResult, CliError> {
-    let symbol = Symbol::parse(&args.symbol)
-        .map_err(CliError::Validation)?;
+    let symbol = Symbol::parse(&args.symbol).map_err(CliError::Validation)?;
 
     let warehouse = ferrotick_warehouse::Warehouse::open_default()
         .map_err(|error| CliError::Command(error.to_string()))?;
 
-    let days = args.days.as_deref().unwrap_or("30").parse::<u32>().unwrap_or(30);
+    let days = args
+        .days
+        .as_deref()
+        .unwrap_or("30")
+        .parse::<u32>()
+        .unwrap_or(30);
     let interval = match args.interval.as_str() {
         "1m" => Interval::OneMinute,
         "5m" => Interval::FiveMinutes,
@@ -33,7 +37,11 @@ pub async fn run(
 
     let limit = (days * 24) as usize; // Approximate bars per day
     let now = UtcDateTime::now();
-    let request_id = format!("cache_load:{}:{}", args.symbol, now.into_inner().unix_timestamp());
+    let request_id = format!(
+        "cache_load:{}:{}",
+        args.symbol,
+        now.into_inner().unix_timestamp()
+    );
 
     // Fetch bars
     let bars_request = BarsRequest::new(symbol.clone(), interval, limit)?;
@@ -62,10 +70,7 @@ pub async fn run(
 
                 warehouse
                     .ingest_bars(
-                        source_chain
-                            .first()
-                            .unwrap_or(&ProviderId::Yahoo)
-                            .as_str(),
+                        source_chain.first().unwrap_or(&ProviderId::Yahoo).as_str(),
                         &format!("bars_{}", interval_str(interval)),
                         &request_id,
                         &bar_records,
@@ -87,22 +92,18 @@ pub async fn run(
 
             Ok(CommandResult::ok(response_value, source_chain))
         }
-        Err(failure) => {
-            Ok(
-                CommandResult::ok(
-                    serde_json::to_value(CacheLoadResponse {
-                        symbol: args.symbol.clone(),
-                        days,
-                        interval: args.interval.clone(),
-                        bars_loaded: 0,
-                        source_chain: failure.source_chain.clone(),
-                        cached_at: UtcDateTime::now().format_rfc3339(),
-                    })?,
-                    failure.source_chain,
-                )
-                .with_errors(failure.errors)
-            )
-        }
+        Err(failure) => Ok(CommandResult::ok(
+            serde_json::to_value(CacheLoadResponse {
+                symbol: args.symbol.clone(),
+                days,
+                interval: args.interval.clone(),
+                bars_loaded: 0,
+                source_chain: failure.source_chain.clone(),
+                cached_at: UtcDateTime::now().format_rfc3339(),
+            })?,
+            failure.source_chain,
+        )
+        .with_errors(failure.errors)),
     }
 }
 

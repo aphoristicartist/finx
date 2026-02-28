@@ -1,4 +1,4 @@
-use ferrotick_strategies::dsl::{StrategySpec};
+use ferrotick_strategies::dsl::StrategySpec;
 
 use crate::error::{AIError, AIResult};
 use crate::llm::LLMClient;

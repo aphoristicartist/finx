@@ -49,7 +49,12 @@ impl Backoff {
     pub fn delay(self, attempt: u32) -> Duration {
         match self {
             Self::Fixed { delay } => delay,
-            Self::Exponential { base, factor, max, jitter } => {
+            Self::Exponential {
+                base,
+                factor,
+                max,
+                jitter,
+            } => {
                 let scale = factor.powi(attempt as i32);
                 let seconds = base.as_secs_f64() * scale;
                 let capped_seconds = seconds.min(max.as_secs_f64());
@@ -60,7 +65,8 @@ impl Backoff {
                 if jitter {
                     let jitter_ms = (delay.as_millis() as f64 * 0.5) as u64;
                     let random_offset = fastrand::u64(0..=(jitter_ms * 2));
-                    let total_ms = delay.as_millis() as i64 + (random_offset as i64 - jitter_ms as i64);
+                    let total_ms =
+                        delay.as_millis() as i64 + (random_offset as i64 - jitter_ms as i64);
                     delay = Duration::from_millis(total_ms.max(0) as u64);
                 }
 
@@ -190,8 +196,20 @@ mod tests {
 
                 // Allow for jitter: should be within ~50-150% of capped base
                 // Use 0.49 and 1.51 to account for integer rounding errors
-                assert!(delay_ms >= expected_capped * 0.49, "attempt={}, delay_ms={}, expected_capped={}", attempt, delay_ms, expected_capped);
-                assert!(delay_ms <= expected_capped * 1.51, "attempt={}, delay_ms={}, expected_capped={}", attempt, delay_ms, expected_capped);
+                assert!(
+                    delay_ms >= expected_capped * 0.49,
+                    "attempt={}, delay_ms={}, expected_capped={}",
+                    attempt,
+                    delay_ms,
+                    expected_capped
+                );
+                assert!(
+                    delay_ms <= expected_capped * 1.51,
+                    "attempt={}, delay_ms={}, expected_capped={}",
+                    attempt,
+                    delay_ms,
+                    expected_capped
+                );
             }
         }
     }

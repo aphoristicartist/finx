@@ -50,6 +50,4 @@ pub mod stream;
 pub use envelope::{EnvelopeBuilder, EnvelopeValidator};
 pub use metadata::{AgentMetadata, RequestId, TraceId};
 pub use schema_registry::{SchemaRegistry, SchemaValidationError};
-pub use stream::{
-    NdjsonStreamWriter, StreamEvent, StreamEventError, StreamEventType,
-};
+pub use stream::{NdjsonStreamWriter, StreamEvent, StreamEventError, StreamEventType};

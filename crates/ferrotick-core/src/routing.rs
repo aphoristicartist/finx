@@ -82,8 +82,6 @@ pub struct SourceRouter {
 
 type InvokeFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, SourceError>> + Send + 'a>>;
 
-
-
 /// Builder for creating a SourceRouter with real HTTP clients.
 ///
 /// This builder reads API keys from environment variables and creates
@@ -163,7 +161,11 @@ impl SourceRouterBuilder {
     }
 
     /// Manually set the Alpaca API credentials.
-    pub fn with_alpaca_keys(mut self, api_key: impl Into<String>, secret_key: impl Into<String>) -> Self {
+    pub fn with_alpaca_keys(
+        mut self,
+        api_key: impl Into<String>,
+        secret_key: impl Into<String>,
+    ) -> Self {
         self.alpaca_api_key = Some(api_key.into());
         self.alpaca_secret_key = Some(secret_key.into());
         self
@@ -217,7 +219,9 @@ impl SourceRouterBuilder {
         }
 
         if self.enable_alpaca {
-            if let (Some(api_key), Some(secret_key)) = (&self.alpaca_api_key, &self.alpaca_secret_key) {
+            if let (Some(api_key), Some(secret_key)) =
+                (&self.alpaca_api_key, &self.alpaca_secret_key)
+            {
                 let http_client = Arc::new(ReqwestHttpClient::new());
                 adapters.push(Arc::new(AlpacaAdapter::with_http_client(
                     http_client,
@@ -230,7 +234,10 @@ impl SourceRouterBuilder {
         if self.enable_alphavantage {
             if let Some(key) = &self.alphavantage_api_key {
                 let http_client = Arc::new(ReqwestHttpClient::new());
-                adapters.push(Arc::new(AlphaVantageAdapter::with_http_client(http_client, key.clone())));
+                adapters.push(Arc::new(AlphaVantageAdapter::with_http_client(
+                    http_client,
+                    key.clone(),
+                )));
             }
         }
 
@@ -546,8 +553,8 @@ fn elapsed_ms(started: Instant) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Symbol;
     use crate::http_client::NoopHttpClient;
+    use crate::Symbol;
     use std::future::Future;
     use std::sync::Arc;
     use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
@@ -556,10 +563,23 @@ mod tests {
     fn test_router() -> SourceRouter {
         let http_client = Arc::new(NoopHttpClient::default());
         SourceRouter::new(vec![
-            Arc::new(PolygonAdapter::with_http_client(http_client.clone(), HttpAuth::None)),
-            Arc::new(AlpacaAdapter::with_http_client(http_client.clone(), "test-key".to_string(), "test-secret".to_string())),
-            Arc::new(AlphaVantageAdapter::with_http_client(http_client.clone(), "test-key".to_string())),
-            Arc::new(YahooAdapter::with_http_client(http_client.clone(), HttpAuth::None)),
+            Arc::new(PolygonAdapter::with_http_client(
+                http_client.clone(),
+                HttpAuth::None,
+            )),
+            Arc::new(AlpacaAdapter::with_http_client(
+                http_client.clone(),
+                "test-key".to_string(),
+                "test-secret".to_string(),
+            )),
+            Arc::new(AlphaVantageAdapter::with_http_client(
+                http_client.clone(),
+                "test-key".to_string(),
+            )),
+            Arc::new(YahooAdapter::with_http_client(
+                http_client.clone(),
+                HttpAuth::None,
+            )),
         ])
     }
 

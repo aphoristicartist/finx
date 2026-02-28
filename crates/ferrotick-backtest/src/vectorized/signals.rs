@@ -28,6 +28,9 @@ impl From<Signal> for i8 {
 
 /// Trait for signal generators
 pub trait SignalGenerator: Send + Sync {
-    fn generate_signals(&self, params: &HashMap<String, f64>) -> Result<Array1<i8>, crate::BacktestError>;
+    fn generate_signals(
+        &self,
+        params: &HashMap<String, f64>,
+    ) -> Result<Array1<i8>, crate::BacktestError>;
     fn name(&self) -> &str;
 }

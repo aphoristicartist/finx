@@ -8,9 +8,21 @@ use tempfile::tempdir;
 fn make_bars(count: usize) -> Vec<Bar> {
     let mut bars = Vec::with_capacity(count);
     for i in 0..count {
-        let ts = UtcDateTime::parse(format!("2024-01-{:02}T00:00:00Z", (i % 28) + 1).as_str()).unwrap();
+        let ts =
+            UtcDateTime::parse(format!("2024-01-{:02}T00:00:00Z", (i % 28) + 1).as_str()).unwrap();
         let close = 100.0 + i as f64 * 0.5;
-        bars.push(Bar::new(ts, close - 1.0, close + 1.0, close - 2.0, close, Some(1_000), None).unwrap());
+        bars.push(
+            Bar::new(
+                ts,
+                close - 1.0,
+                close + 1.0,
+                close - 2.0,
+                close,
+                Some(1_000),
+                None,
+            )
+            .unwrap(),
+        );
     }
     bars
 }
@@ -31,7 +43,8 @@ fn computes_required_phase7_features() {
     let bars = make_bars(80);
     let symbol = Symbol::parse("AAPL").unwrap();
 
-    let engineer = FeatureEngineer::new(FeatureConfig::default(), IndicatorSelection::all()).unwrap();
+    let engineer =
+        FeatureEngineer::new(FeatureConfig::default(), IndicatorSelection::all()).unwrap();
     let rows = engineer.compute_for_symbol(&symbol, &bars).unwrap();
 
     assert_eq!(rows.len(), 80);
@@ -67,7 +80,8 @@ async fn store_roundtrip_and_parquet_export_work() {
 
     let symbol = Symbol::parse("AAPL").unwrap();
     let bars = store.load_daily_bars(&symbol, None, None).unwrap();
-    let engineer = FeatureEngineer::new(FeatureConfig::default(), IndicatorSelection::all()).unwrap();
+    let engineer =
+        FeatureEngineer::new(FeatureConfig::default(), IndicatorSelection::all()).unwrap();
     let rows = engineer.compute_for_symbol(&symbol, &bars).unwrap();
 
     let written = store.upsert_features(&rows).unwrap();

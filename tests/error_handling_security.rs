@@ -5,7 +5,9 @@
 
 use ferrotick_core::{
     circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitState},
-    data_source::{BarsRequest, DataSource, FundamentalsRequest, HealthState, QuoteRequest, SourceErrorKind},
+    data_source::{
+        BarsRequest, DataSource, FundamentalsRequest, HealthState, QuoteRequest, SourceErrorKind,
+    },
     routing::{SourceRouter, SourceStrategy},
     ProviderId, Symbol,
 };
@@ -21,7 +23,7 @@ mod test_helpers;
 use test_helpers::{mock_alpaca, mock_router};
 
 // Import adapters for direct manipulation tests
-use ferrotick_core::{YahooAdapter, PolygonAdapter};
+use ferrotick_core::{PolygonAdapter, YahooAdapter};
 
 // =============================================================================
 // Error Handling: Network Failures
@@ -40,8 +42,8 @@ async fn when_network_request_fails_user_receives_unavailable_error() {
     let adapter = YahooAdapter::with_circuit_breaker_for_test(circuit_breaker);
 
     // When: A request is made
-    let request = QuoteRequest::new(vec![Symbol::parse("AAPL").expect("valid")])
-        .expect("valid request");
+    let request =
+        QuoteRequest::new(vec![Symbol::parse("AAPL").expect("valid")]).expect("valid request");
     let result = adapter.quote(request).await;
 
     // Then: An unavailable error is returned with retry guidance
@@ -138,7 +140,10 @@ async fn when_provider_doesnt_support_endpoint_clear_error_is_returned() {
     // Then: An unsupported endpoint error is returned
     let error = result.expect_err("unsupported endpoint should fail");
     assert_eq!(error.kind(), SourceErrorKind::UnsupportedEndpoint);
-    assert!(!error.retryable(), "unsupported endpoints are not retryable");
+    assert!(
+        !error.retryable(),
+        "unsupported endpoints are not retryable"
+    );
 }
 
 #[tokio::test]
@@ -208,7 +213,10 @@ async fn when_provider_health_degrades_routing_adapts() {
 
     // Then: Health reflects degraded state but still available
     assert_eq!(health.state, HealthState::Degraded);
-    assert!(health.rate_available, "degraded provider should still be usable");
+    assert!(
+        health.rate_available,
+        "degraded provider should still be usable"
+    );
 }
 
 // =============================================================================
@@ -252,7 +260,10 @@ fn when_sql_injection_attempted_query_is_handled_safely() {
     match result {
         Ok(query_result) => {
             // If parsed, it was treated as a single query, not injection
-            assert_eq!(query_result.row_count, 0, "injection payload shouldn't match");
+            assert_eq!(
+                query_result.row_count, 0,
+                "injection payload shouldn't match"
+            );
         }
         Err(_) => {
             // Query rejected - also safe
@@ -564,13 +575,16 @@ async fn when_circuit_breaker_open_user_gets_retry_guidance() {
     let adapter = YahooAdapter::with_circuit_breaker_for_test(circuit_breaker);
 
     // When: Request is made
-    let request = QuoteRequest::new(vec![Symbol::parse("AAPL").expect("valid")])
-        .expect("valid request");
+    let request =
+        QuoteRequest::new(vec![Symbol::parse("AAPL").expect("valid")]).expect("valid request");
     let result = adapter.quote(request).await;
 
     // Then: Error indicates it's retryable (circuit will close after timeout)
     let error = result.expect_err("should fail with open circuit");
-    assert!(error.retryable(), "circuit breaker errors should be retryable");
+    assert!(
+        error.retryable(),
+        "circuit breaker errors should be retryable"
+    );
 }
 
 // =============================================================================
@@ -603,7 +617,13 @@ async fn when_routing_fails_each_error_identifies_its_source() {
         );
         let source = error.source.unwrap();
         assert!(
-            matches!(source, ProviderId::Polygon | ProviderId::Alpaca | ProviderId::Yahoo | ProviderId::Alphavantage),
+            matches!(
+                source,
+                ProviderId::Polygon
+                    | ProviderId::Alpaca
+                    | ProviderId::Yahoo
+                    | ProviderId::Alphavantage
+            ),
             "source should be a valid provider"
         );
     }

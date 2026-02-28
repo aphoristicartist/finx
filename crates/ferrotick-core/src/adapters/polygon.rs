@@ -40,23 +40,38 @@ impl PolygonAdapter {
     }
 
     /// Create an adapter with custom health state (for testing).
-    pub fn with_health(health_state: HealthState, rate_available: bool, http_client: Arc<dyn HttpClient>, auth: HttpAuth) -> Self {
+    pub fn with_health(
+        health_state: HealthState,
+        rate_available: bool,
+        http_client: Arc<dyn HttpClient>,
+        auth: HttpAuth,
+    ) -> Self {
         Self {
             health_state,
             rate_available,
             http_client,
             auth,
-            ..Self::with_http_client(Arc::new(crate::http_client::ReqwestHttpClient::new()), HttpAuth::None)
+            ..Self::with_http_client(
+                Arc::new(crate::http_client::ReqwestHttpClient::new()),
+                HttpAuth::None,
+            )
         }
     }
 
     /// Create an adapter with a custom circuit breaker.
-    pub fn with_circuit_breaker(circuit_breaker: Arc<CircuitBreaker>, http_client: Arc<dyn HttpClient>, auth: HttpAuth) -> Self {
+    pub fn with_circuit_breaker(
+        circuit_breaker: Arc<CircuitBreaker>,
+        http_client: Arc<dyn HttpClient>,
+        auth: HttpAuth,
+    ) -> Self {
         Self {
             circuit_breaker,
             http_client,
             auth,
-            ..Self::with_http_client(Arc::new(crate::http_client::ReqwestHttpClient::new()), HttpAuth::None)
+            ..Self::with_http_client(
+                Arc::new(crate::http_client::ReqwestHttpClient::new()),
+                HttpAuth::None,
+            )
         }
     }
 
@@ -106,7 +121,9 @@ impl PolygonAdapter {
 
         // Parse Polygon response
         let polygon_response: PolygonPrevCloseResponse = serde_json::from_str(&response.body)
-            .map_err(|e| SourceError::internal(format!("failed to parse polygon response: {}", e)))?;
+            .map_err(|e| {
+                SourceError::internal(format!("failed to parse polygon response: {}", e))
+            })?;
 
         if polygon_response.status != "OK" && polygon_response.status != "DELAYED" {
             return Err(SourceError::unavailable(format!(
@@ -120,13 +137,12 @@ impl PolygonAdapter {
             .into_iter()
             .filter_map(|result| {
                 let sym = Symbol::parse(&result.ticker).ok()?;
-                let ts_offset = time::OffsetDateTime::from_unix_timestamp(result.t)
-                    .ok()?;
+                let ts_offset = time::OffsetDateTime::from_unix_timestamp(result.t).ok()?;
                 let ts = UtcDateTime::from_offset_datetime(ts_offset).ok()?;
 
                 Quote::new(
                     sym,
-                    result.c, // close price as last price
+                    result.c,              // close price as last price
                     Some(result.c - 0.05), // approximate bid
                     Some(result.c + 0.05), // approximate ask
                     result.v.map(|v| v as u64),
@@ -272,7 +288,9 @@ impl PolygonAdapter {
         self.circuit_breaker.record_success();
 
         let search_response: PolygonTickerSearchResponse = serde_json::from_str(&response.body)
-            .map_err(|e| SourceError::internal(format!("failed to parse search response: {}", e)))?;
+            .map_err(|e| {
+                SourceError::internal(format!("failed to parse search response: {}", e))
+            })?;
 
         let results = search_response
             .results
@@ -399,18 +417,32 @@ impl DataSource for PolygonAdapter {
     fn financials<'a>(
         &'a self,
         _req: crate::data_source::FinancialsRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<crate::data_source::FinancialsBatch, SourceError>> + Send + 'a>> {
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<crate::data_source::FinancialsBatch, SourceError>>
+                + Send
+                + 'a,
+        >,
+    > {
         Box::pin(async move {
-            Err(SourceError::unsupported_endpoint(crate::data_source::Endpoint::Financials))
+            Err(SourceError::unsupported_endpoint(
+                crate::data_source::Endpoint::Financials,
+            ))
         })
     }
 
     fn earnings<'a>(
         &'a self,
         _req: crate::data_source::EarningsRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<crate::data_source::EarningsBatch, SourceError>> + Send + 'a>> {
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<crate::data_source::EarningsBatch, SourceError>> + Send + 'a,
+        >,
+    > {
         Box::pin(async move {
-            Err(SourceError::unsupported_endpoint(crate::data_source::Endpoint::Earnings))
+            Err(SourceError::unsupported_endpoint(
+                crate::data_source::Endpoint::Earnings,
+            ))
         })
     }
 
