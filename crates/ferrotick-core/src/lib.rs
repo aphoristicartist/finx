@@ -113,6 +113,7 @@
 //! - Input validation on all domain types
 
 pub mod adapters;
+pub mod assets;
 pub mod cache;
 pub mod circuit_breaker;
 pub mod data_source;
@@ -127,6 +128,11 @@ pub mod source;
 pub mod throttling;
 
 // Re-export commonly used types at crate root for convenience
+
+// Asset types
+pub use assets::{
+    CryptoExchange, CryptoPair, ForexPair, FuturesContract, Greeks, OptionContract, OptionType,
+};
 
 // Adapter implementations
 pub use adapters::{AlpacaAdapter, AlphaVantageAdapter, PolygonAdapter, YahooAdapter};

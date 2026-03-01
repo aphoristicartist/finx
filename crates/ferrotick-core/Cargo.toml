@@ -42,3 +42,7 @@ path = "../../tests/warehouse_behavior.rs"
 [[test]]
 name = "error_handling_security"
 path = "../../tests/error_handling_security.rs"
+
+[[test]]
+name = "assets_test"
+path = "../../tests/assets_test.rs"
