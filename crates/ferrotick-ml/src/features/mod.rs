@@ -164,9 +164,9 @@ impl FeatureEngineer {
             vec![None; bars.len()]
         };
 
-        let return_1d = transforms::simple_returns(&closes, 1);
-        let return_5d = transforms::simple_returns(&closes, 5);
-        let return_20d = transforms::simple_returns(&closes, 20);
+        let return_1d = transforms::forward_simple_returns(&closes, 1);
+        let return_5d = transforms::forward_simple_returns(&closes, 5);
+        let return_20d = transforms::forward_simple_returns(&closes, 20);
 
         let rolling_mean_20 = windows::rolling_mean(&closes, self.config.window);
         let rolling_std_20 = windows::rolling_std(&closes, self.config.window);

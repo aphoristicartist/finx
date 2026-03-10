@@ -1,4 +1,5 @@
 use reqwest::cookie::Jar;
+use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 use std::future::Future;
@@ -161,9 +162,401 @@ impl HttpClient for NoopHttpClient {
         &'a self,
         request: HttpRequest,
     ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, HttpError>> + Send + 'a>> {
-        let _ = request;
-        Box::pin(async move { Ok(HttpResponse::ok_json("{}")) })
+        Box::pin(async move { Ok(mock_noop_response(&request.url)) })
     }
+}
+
+fn mock_noop_response(url: &str) -> HttpResponse {
+    if url.contains("fc.yahoo.com") {
+        return HttpResponse::ok_json("{}");
+    }
+    if url.contains("finance.yahoo.com/v1/test/getcrumb") {
+        return HttpResponse {
+            status: 200,
+            body: String::from("mockcrumb"),
+        };
+    }
+
+    if url.contains("api.polygon.io/v2/aggs/ticker/") && url.contains("/prev") {
+        let symbol = extract_between(url, "/ticker/", "/").unwrap_or("AAPL");
+        let now_ts = time::OffsetDateTime::now_utc().unix_timestamp();
+        return HttpResponse::ok_json(
+            json!({
+                "status": "OK",
+                "results": [{
+                    "T": symbol,
+                    "c": 150.0,
+                    "v": 1_000_000,
+                    "t": now_ts
+                }]
+            })
+            .to_string(),
+        );
+    }
+
+    if url.contains("api.polygon.io/v2/aggs/ticker/") && url.contains("/range/") {
+        let limit = query_param(url, "limit")
+            .and_then(|raw| raw.parse::<usize>().ok())
+            .unwrap_or(30);
+        let start_ts = time::OffsetDateTime::now_utc().unix_timestamp() - (limit as i64 * 60);
+        let mut results = Vec::with_capacity(limit);
+        for idx in 0..limit {
+            let base = 100.0 + idx as f64 * 0.1;
+            results.push(json!({
+                "o": base,
+                "h": base + 1.0,
+                "l": base - 1.0,
+                "c": base + 0.5,
+                "v": 1_000_000 + idx as i64,
+                "vw": base + 0.25,
+                "t": start_ts + (idx as i64 * 60)
+            }));
+        }
+        return HttpResponse::ok_json(json!({ "results": results }).to_string());
+    }
+
+    if url.contains("api.polygon.io/v3/reference/tickers") {
+        let query = query_param(url, "search").unwrap_or_else(|| String::from("apple"));
+        return HttpResponse::ok_json(
+            json!({
+                "results": [{
+                    "ticker": "AAPL",
+                    "name": format!("{} Incorporated", query),
+                    "market": "stocks",
+                    "active": true,
+                    "primary_exchange": "XNAS",
+                    "currency_name": "USD"
+                }]
+            })
+            .to_string(),
+        );
+    }
+
+    if url.contains("data.alpaca.markets/v2/stocks/quotes/latest") {
+        let symbols = parse_symbols(url);
+        let now_ts = time::OffsetDateTime::now_utc().unix_timestamp();
+        let mut quotes = Map::new();
+        for (idx, symbol) in symbols.iter().enumerate() {
+            let bid = 100.0 + idx as f64;
+            quotes.insert(
+                symbol.clone(),
+                json!({
+                    "bp": bid,
+                    "ap": bid + 0.2,
+                    "t": (now_ts + idx as i64).to_string(),
+                    "v": 1_000_000 + idx as i64
+                }),
+            );
+        }
+        return HttpResponse::ok_json(json!({ "quotes": quotes }).to_string());
+    }
+
+    if url.contains("data.alpaca.markets/v2/stocks/") && url.contains("/bars?") {
+        let limit = query_param(url, "limit")
+            .and_then(|raw| raw.parse::<usize>().ok())
+            .unwrap_or(30);
+        let mut bars = Vec::with_capacity(limit);
+        for idx in 0..limit {
+            let base = 200.0 + idx as f64 * 0.2;
+            bars.push(json!({
+                "t": format!("2024-01-01T09:{:02}:00Z", idx % 60),
+                "o": base,
+                "h": base + 1.0,
+                "l": base - 1.0,
+                "c": base + 0.25,
+                "v": 500_000 + idx as i64,
+                "vw": base + 0.1
+            }));
+        }
+        return HttpResponse::ok_json(json!({ "bars": bars }).to_string());
+    }
+
+    if url.contains("alphavantage.co/query") {
+        let function = query_param(url, "function").unwrap_or_default();
+        if function == "GLOBAL_QUOTE" {
+            return HttpResponse::ok_json(
+                json!({
+                    "Global Quote": {
+                        "05. price": 150.0,
+                        "06. volume": 1_000_000
+                    }
+                })
+                .to_string(),
+            );
+        }
+        if function.starts_with("TIME_SERIES") {
+            let mut series = Map::new();
+            for idx in 0..64 {
+                series.insert(
+                    format!("2024-01-01 09:{:02}:00", idx % 60),
+                    json!({
+                        "1. open": 120.0 + idx as f64 * 0.1,
+                        "2. high": 121.0 + idx as f64 * 0.1,
+                        "3. low": 119.0 + idx as f64 * 0.1,
+                        "4. close": 120.5 + idx as f64 * 0.1,
+                        "5. volume": 100_000 + idx as i64
+                    }),
+                );
+            }
+            return HttpResponse::ok_json(json!({ "Time Series (1min)": series }).to_string());
+        }
+        if function == "SYMBOL_SEARCH" {
+            return HttpResponse::ok_json(
+                json!({
+                    "bestMatches": [{
+                        "1. symbol": "AAPL",
+                        "2. name": "Apple Inc.",
+                        "3. type": "Equity",
+                        "8. currency": "USD"
+                    }]
+                })
+                .to_string(),
+            );
+        }
+    }
+
+    if url.contains("query1.finance.yahoo.com/v7/finance/quote?") {
+        let symbols = parse_symbols(url);
+        let result: Vec<Value> = symbols
+            .iter()
+            .enumerate()
+            .map(|(idx, symbol)| {
+                json!({
+                    "symbol": symbol,
+                    "regularMarketPrice": 180.0 + idx as f64,
+                    "regularMarketBid": 179.9 + idx as f64,
+                    "regularMarketAsk": 180.1 + idx as f64,
+                    "regularMarketVolume": 1_000_000 + idx as i64,
+                    "currency": "USD"
+                })
+            })
+            .collect();
+
+        return HttpResponse::ok_json(
+            json!({
+                "quoteResponse": {
+                    "result": result,
+                    "error": null
+                }
+            })
+            .to_string(),
+        );
+    }
+
+    if url.contains("query1.finance.yahoo.com/v8/finance/chart/") {
+        let mut timestamp = Vec::with_capacity(512);
+        let mut open = Vec::with_capacity(512);
+        let mut high = Vec::with_capacity(512);
+        let mut low = Vec::with_capacity(512);
+        let mut close = Vec::with_capacity(512);
+        let mut volume = Vec::with_capacity(512);
+        for idx in 0..512 {
+            let base = 100.0 + idx as f64 * 0.05;
+            timestamp.push(json!(1_700_000_000 + idx as i64 * 60));
+            open.push(json!(base));
+            high.push(json!(base + 1.0));
+            low.push(json!(base - 1.0));
+            close.push(json!(base + 0.25));
+            volume.push(json!(1_000_000 + idx as i64));
+        }
+
+        return HttpResponse::ok_json(
+            json!({
+                "chart": {
+                    "result": [{
+                        "timestamp": timestamp,
+                        "indicators": {
+                            "quote": [{
+                                "open": open,
+                                "high": high,
+                                "low": low,
+                                "close": close,
+                                "volume": volume
+                            }]
+                        }
+                    }],
+                    "error": null
+                }
+            })
+            .to_string(),
+        );
+    }
+
+    if url.contains("query2.finance.yahoo.com/v1/finance/search") {
+        return HttpResponse::ok_json(
+            json!({
+                "quotes": [{
+                    "symbol": "AAPL",
+                    "shortname": "Apple Inc.",
+                    "exchange": "NASDAQ",
+                    "quoteType": "EQUITY",
+                    "currency": "USD"
+                }]
+            })
+            .to_string(),
+        );
+    }
+
+    if url.contains("/v10/finance/quoteSummary/") {
+        let modules = query_param(url, "modules").unwrap_or_default();
+
+        if modules.contains("earnings") {
+            return HttpResponse::ok_json(
+                json!({
+                    "quoteSummary": {
+                        "result": [{
+                            "earnings": {
+                                "financialsChart": {
+                                    "quarterly": [{
+                                        "date": "2024-12-31T00:00:00Z",
+                                        "actual": 2.0,
+                                        "estimate": 1.8,
+                                        "year": 2024,
+                                        "quarter": 4
+                                    }]
+                                }
+                            }
+                        }],
+                        "error": null
+                    }
+                })
+                .to_string(),
+            );
+        }
+
+        if modules.contains("incomeStatementHistory")
+            || modules.contains("balanceSheetHistory")
+            || modules.contains("cashflowStatementHistory")
+        {
+            return HttpResponse::ok_json(
+                json!({
+                    "quoteSummary": {
+                        "result": [{
+                            "incomeStatementHistory": {
+                                "incomeStatementHistory": [{
+                                    "endDate": { "fmt": "2024-12-31T00:00:00Z" },
+                                    "totalRevenue": { "raw": 100_000_000.0 },
+                                    "grossProfit": { "raw": 40_000_000.0 },
+                                    "netIncome": { "raw": 20_000_000.0 },
+                                    "basicEPS": { "raw": 2.5 }
+                                }]
+                            },
+                            "incomeStatementHistoryQuarterly": {
+                                "incomeStatementHistory": [{
+                                    "endDate": { "fmt": "2024-12-31T00:00:00Z" },
+                                    "totalRevenue": { "raw": 25_000_000.0 },
+                                    "grossProfit": { "raw": 10_000_000.0 },
+                                    "netIncome": { "raw": 5_000_000.0 },
+                                    "basicEPS": { "raw": 0.6 }
+                                }]
+                            },
+                            "balanceSheetHistory": {
+                                "balanceSheetHistory": [{
+                                    "endDate": { "fmt": "2024-12-31T00:00:00Z" },
+                                    "totalAssets": { "raw": 300_000_000.0 },
+                                    "totalLiab": { "raw": 120_000_000.0 },
+                                    "totalStockholderEquity": { "raw": 180_000_000.0 },
+                                    "cash": { "raw": 40_000_000.0 }
+                                }]
+                            },
+                            "balanceSheetHistoryQuarterly": {
+                                "balanceSheetHistory": [{
+                                    "endDate": { "fmt": "2024-12-31T00:00:00Z" },
+                                    "totalAssets": { "raw": 310_000_000.0 },
+                                    "totalLiab": { "raw": 125_000_000.0 },
+                                    "totalStockholderEquity": { "raw": 185_000_000.0 },
+                                    "cash": { "raw": 42_000_000.0 }
+                                }]
+                            },
+                            "cashflowStatementHistory": {
+                                "cashflowStatementHistory": [{
+                                    "endDate": { "fmt": "2024-12-31T00:00:00Z" },
+                                    "totalCashFromOperatingActivities": { "raw": 30_000_000.0 },
+                                    "totalCashflowsFromInvestingActivities": { "raw": -8_000_000.0 },
+                                    "totalCashFromFinancingActivities": { "raw": -5_000_000.0 },
+                                    "capitalExpenditures": { "raw": -3_500_000.0 }
+                                }]
+                            },
+                            "cashflowStatementHistoryQuarterly": {
+                                "cashflowStatementHistory": [{
+                                    "endDate": { "fmt": "2024-12-31T00:00:00Z" },
+                                    "totalCashFromOperatingActivities": { "raw": 7_500_000.0 },
+                                    "totalCashflowsFromInvestingActivities": { "raw": -2_000_000.0 },
+                                    "totalCashFromFinancingActivities": { "raw": -1_200_000.0 },
+                                    "capitalExpenditures": { "raw": -900_000.0 }
+                                }]
+                            }
+                        }],
+                        "error": null
+                    }
+                })
+                .to_string(),
+            );
+        }
+
+        return HttpResponse::ok_json(
+            json!({
+                "quoteSummary": {
+                    "result": [{
+                        "price": {
+                            "marketCap": { "raw": 2_500_000_000_000.0 }
+                        },
+                        "summaryDetail": {
+                            "forwardPE": { "raw": 28.0 },
+                            "PE_RATIO": { "raw": 30.0 },
+                            "dividendYield": { "raw": 0.005 }
+                        },
+                        "defaultKeyStatistics": {
+                            "marketCap": { "raw": 2_500_000_000_000.0 },
+                            "PE_RATIO": { "raw": 30.0 },
+                            "dividendYield": { "raw": 0.005 }
+                        }
+                    }],
+                    "error": null
+                }
+            })
+            .to_string(),
+        );
+    }
+
+    HttpResponse::ok_json("{}")
+}
+
+fn query_param(url: &str, key: &str) -> Option<String> {
+    let query = url.split_once('?')?.1;
+    query.split('&').find_map(|pair| {
+        let mut parts = pair.splitn(2, '=');
+        let name = parts.next()?;
+        let value = parts.next().unwrap_or_default();
+        if name.eq_ignore_ascii_case(key) {
+            Some(
+                urlencoding::decode(value)
+                    .map(|decoded| decoded.into_owned())
+                    .unwrap_or_else(|_| value.to_string()),
+            )
+        } else {
+            None
+        }
+    })
+}
+
+fn parse_symbols(url: &str) -> Vec<String> {
+    let raw = query_param(url, "symbols").unwrap_or_else(|| String::from("AAPL"));
+    raw.split(',')
+        .filter_map(|symbol| {
+            let trimmed = symbol.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+        .collect()
+}
+
+fn extract_between<'a>(haystack: &'a str, start: &str, end: &str) -> Option<&'a str> {
+    let suffix = haystack.split(start).nth(1)?;
+    Some(suffix.split(end).next().unwrap_or(suffix))
 }
 
 /// Production HTTP client using reqwest for real API calls.

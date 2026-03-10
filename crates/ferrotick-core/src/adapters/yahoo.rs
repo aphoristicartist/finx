@@ -6,6 +6,7 @@ use std::time::Instant;
 
 use serde::Deserialize;
 
+use crate::cache::CacheStore;
 use crate::circuit_breaker::{CircuitBreaker, CircuitState};
 use crate::data_source::{
     BarsRequest, CapabilitySet, DataSource, FundamentalsBatch, FundamentalsRequest, HealthState,
@@ -188,23 +189,27 @@ pub struct YahooAdapter {
     rate_available: bool,
     score: u16,
     http_client: Arc<dyn HttpClient>,
-    auth: HttpAuth,
     circuit_breaker: Arc<CircuitBreaker>,
     /// Auth manager for cookie/crumb handling
     auth_manager: Arc<YahooAuthManager>,
+    cache: CacheStore,
 }
 
 impl YahooAdapter {
     /// Create a new YahooAdapter with a real HTTP client and authentication.
-    pub fn with_http_client(http_client: Arc<dyn HttpClient>, auth: HttpAuth) -> Self {
+    pub fn with_http_client(
+        http_client: Arc<dyn HttpClient>,
+        _auth: HttpAuth,
+        cache: Option<CacheStore>,
+    ) -> Self {
         Self {
             health_state: HealthState::Healthy,
             rate_available: true,
             score: 78,
             http_client,
-            auth,
             circuit_breaker: Arc::new(CircuitBreaker::default()),
             auth_manager: Arc::new(YahooAuthManager::default()),
+            cache: cache.unwrap_or_else(CacheStore::with_default_ttl),
         }
     }
 
@@ -213,10 +218,11 @@ impl YahooAdapter {
         circuit_breaker: Arc<CircuitBreaker>,
         http_client: Arc<dyn HttpClient>,
         auth: HttpAuth,
+        cache: Option<CacheStore>,
     ) -> Self {
         Self {
             circuit_breaker,
-            ..Self::with_http_client(http_client, auth)
+            ..Self::with_http_client(http_client, auth, cache)
         }
     }
 
@@ -226,11 +232,12 @@ impl YahooAdapter {
         rate_available: bool,
         http_client: Arc<dyn HttpClient>,
         auth: HttpAuth,
+        cache: Option<CacheStore>,
     ) -> Self {
         Self {
             health_state,
             rate_available,
-            ..Self::with_http_client(http_client, auth)
+            ..Self::with_http_client(http_client, auth, cache)
         }
     }
 
@@ -241,6 +248,7 @@ impl YahooAdapter {
             circuit_breaker,
             Arc::new(crate::http_client::ReqwestHttpClient::new()),
             HttpAuth::None,
+            None,
         )
     }
 
@@ -252,12 +260,30 @@ impl YahooAdapter {
             rate_available,
             Arc::new(crate::http_client::ReqwestHttpClient::new()),
             HttpAuth::None,
+            None,
         )
     }
 
     /// Handle authentication errors by invalidating cached auth
     fn handle_auth_error(&self) {
         self.auth_manager.invalidate();
+    }
+
+    fn bars_cache_key(symbol: &Symbol, interval: Interval, limit: usize) -> String {
+        format!("bars:{}:{}:{}", symbol.as_str(), interval.as_str(), limit)
+    }
+
+    fn quote_cache_key(symbol: &Symbol) -> String {
+        format!("quote:{}", symbol.as_str())
+    }
+
+    async fn fetch_crumb(&self) -> Result<String, SourceError> {
+        self.auth_manager
+            .get_crumb(&self.http_client)
+            .await
+            .inspect_err(|_| {
+                self.circuit_breaker.record_failure();
+            })
     }
 }
 
@@ -403,6 +429,15 @@ impl DataSource for YahooAdapter {
 // Real API implementation methods
 impl YahooAdapter {
     async fn fetch_real_quotes(&self, req: &QuoteRequest) -> Result<QuoteBatch, SourceError> {
+        let cache_key = Self::quote_cache_key(&req.symbols[0]);
+        if let Some(cached_body) = self.cache.get(&cache_key).await {
+            return self.parse_quote_response(&cached_body);
+        }
+
+        if !self.circuit_breaker.allow_request() {
+            return Err(SourceError::unavailable("yahoo circuit breaker is open"));
+        }
+
         let symbols_param = req
             .symbols
             .iter()
@@ -411,7 +446,7 @@ impl YahooAdapter {
             .join(",");
 
         // Get crumb for authentication
-        let crumb = self.auth_manager.get_crumb(&self.http_client).await?;
+        let crumb = self.fetch_crumb().await?;
 
         let endpoint = format!(
             "https://query1.finance.yahoo.com/v7/finance/quote?symbols={}&fields=regularMarketPrice,regularMarketBid,regularMarketAsk,regularMarketVolume,currency&crumb={}",
@@ -419,11 +454,14 @@ impl YahooAdapter {
             urlencoding::encode(&crumb)
         );
 
-        self.fetch_quotes_with_retry(&endpoint).await
+        let response_body = self.fetch_quotes_with_retry(&endpoint).await?;
+        let quote_batch = self.parse_quote_response(&response_body)?;
+        self.cache.put(cache_key, response_body, None).await;
+        Ok(quote_batch)
     }
 
     /// Fetch quotes with automatic auth retry on 401/429
-    async fn fetch_quotes_with_retry(&self, endpoint: &str) -> Result<QuoteBatch, SourceError> {
+    async fn fetch_quotes_with_retry(&self, endpoint: &str) -> Result<String, SourceError> {
         if !self.circuit_breaker.allow_request() {
             return Err(SourceError::unavailable("yahoo circuit breaker is open"));
         }
@@ -443,10 +481,10 @@ impl YahooAdapter {
             self.handle_auth_error();
 
             // Get fresh crumb
-            let _ = self.auth_manager.get_crumb(&self.http_client).await;
+            let _ = self.fetch_crumb().await;
 
             // Retry with fresh crumb (rebuild endpoint with new crumb)
-            let crumb = self.auth_manager.get_crumb(&self.http_client).await?;
+            let crumb = self.fetch_crumb().await?;
             let endpoint_with_crumb = if endpoint.contains("&crumb=") {
                 // Replace existing crumb
                 endpoint.split("&crumb=").next().unwrap().to_string()
@@ -482,7 +520,7 @@ impl YahooAdapter {
             }
 
             self.circuit_breaker.record_success();
-            return self.parse_quote_response(&retry_response.body);
+            return Ok(retry_response.body);
         }
 
         if !response.is_success() {
@@ -494,7 +532,7 @@ impl YahooAdapter {
         }
 
         self.circuit_breaker.record_success();
-        self.parse_quote_response(&response.body)
+        Ok(response.body)
     }
 
     /// Parse Yahoo quote response JSON
@@ -537,6 +575,15 @@ impl YahooAdapter {
     }
 
     async fn fetch_real_bars(&self, req: &BarsRequest) -> Result<BarSeries, SourceError> {
+        let cache_key = Self::bars_cache_key(&req.symbol, req.interval, req.limit);
+        if let Some(cached_body) = self.cache.get(&cache_key).await {
+            return self.parse_bars_response(&cached_body, &req.symbol, req.interval, req.limit);
+        }
+
+        if !self.circuit_breaker.allow_request() {
+            return Err(SourceError::unavailable("yahoo circuit breaker is open"));
+        }
+
         let range = match req.limit {
             0..=100 => "1d",
             101..=1000 => "1mo",
@@ -552,7 +599,7 @@ impl YahooAdapter {
         };
 
         // Get crumb for authentication
-        let crumb = self.auth_manager.get_crumb(&self.http_client).await?;
+        let crumb = self.fetch_crumb().await?;
 
         let endpoint = format!(
             "https://query1.finance.yahoo.com/v8/finance/chart/{}?range={}&interval={}&crumb={}",
@@ -562,18 +609,15 @@ impl YahooAdapter {
             urlencoding::encode(&crumb)
         );
 
-        self.fetch_bars_with_retry(&endpoint, &req.symbol, req.interval, req.limit)
-            .await
+        let response_body = self.fetch_bars_with_retry(&endpoint).await?;
+        let series =
+            self.parse_bars_response(&response_body, &req.symbol, req.interval, req.limit)?;
+        self.cache.put(cache_key, response_body, None).await;
+        Ok(series)
     }
 
     /// Fetch bars with automatic auth retry on 401/429
-    async fn fetch_bars_with_retry(
-        &self,
-        endpoint: &str,
-        symbol: &Symbol,
-        interval: Interval,
-        limit: usize,
-    ) -> Result<BarSeries, SourceError> {
+    async fn fetch_bars_with_retry(&self, endpoint: &str) -> Result<String, SourceError> {
         if !self.circuit_breaker.allow_request() {
             return Err(SourceError::unavailable("yahoo circuit breaker is open"));
         }
@@ -593,7 +637,7 @@ impl YahooAdapter {
             self.handle_auth_error();
 
             // Get fresh crumb and rebuild endpoint
-            let crumb = self.auth_manager.get_crumb(&self.http_client).await?;
+            let crumb = self.fetch_crumb().await?;
 
             let base_endpoint = endpoint.split("&crumb=").next().unwrap_or(endpoint);
 
@@ -637,8 +681,18 @@ impl YahooAdapter {
             response.body
         };
 
+        Ok(response_body)
+    }
+
+    fn parse_bars_response(
+        &self,
+        response_body: &str,
+        symbol: &Symbol,
+        interval: Interval,
+        limit: usize,
+    ) -> Result<BarSeries, SourceError> {
         // Parse Yahoo Finance chart response
-        let chart_response: YahooChartResponse = serde_json::from_str(&response_body)
+        let chart_response: YahooChartResponse = serde_json::from_str(response_body)
             .map_err(|e| SourceError::internal(format!("failed to parse yahoo chart: {}", e)))?;
 
         // Check for API-level errors
@@ -698,7 +752,7 @@ impl YahooAdapter {
         req: &FundamentalsRequest,
     ) -> Result<FundamentalsBatch, SourceError> {
         // Get crumb for authentication
-        let crumb = self.auth_manager.get_crumb(&self.http_client).await?;
+        let crumb = self.fetch_crumb().await?;
 
         let as_of = UtcDateTime::now();
         let mut fundamentals = Vec::new();
@@ -806,9 +860,9 @@ impl YahooAdapter {
         let response = if response.status == 401 || response.status == 429 {
             self.handle_auth_error();
 
-            let _ = self.auth_manager.get_crumb(&self.http_client).await;
+            let _ = self.fetch_crumb().await;
 
-            let crumb = self.auth_manager.get_crumb(&self.http_client).await?;
+            let crumb = self.fetch_crumb().await?;
 
             let base_endpoint = endpoint.split("&crumb=").next().unwrap_or(endpoint);
 
@@ -847,7 +901,7 @@ impl YahooAdapter {
     }
 
     async fn execute_real_search(&self, req: &SearchRequest) -> Result<SearchBatch, SourceError> {
-        let crumb = self.auth_manager.get_crumb(&self.http_client).await?;
+        let crumb = self.fetch_crumb().await?;
 
         let endpoint = format!(
             "https://query2.finance.yahoo.com/v1/finance/search?q={}&quotesCount={}&crumb={}",
@@ -883,9 +937,9 @@ impl YahooAdapter {
         let response_body = if response.status == 401 || response.status == 429 {
             self.handle_auth_error();
 
-            let _ = self.auth_manager.get_crumb(&self.http_client).await;
+            let _ = self.fetch_crumb().await;
 
-            let crumb = self.auth_manager.get_crumb(&self.http_client).await?;
+            let crumb = self.fetch_crumb().await?;
 
             let base_endpoint = endpoint.split("&crumb=").next().unwrap_or(endpoint);
 
@@ -978,7 +1032,7 @@ impl YahooAdapter {
         &self,
         req: &crate::data_source::FinancialsRequest,
     ) -> Result<crate::data_source::FinancialsBatch, SourceError> {
-        let crumb = self.auth_manager.get_crumb(&self.http_client).await?;
+        let crumb = self.fetch_crumb().await?;
 
         // Map statement type to Yahoo modules
         let modules = match req.statement_type {
@@ -1254,8 +1308,8 @@ impl YahooAdapter {
 
         let response = if response.status == 401 || response.status == 429 {
             self.handle_auth_error();
-            let _ = self.auth_manager.get_crumb(&self.http_client).await;
-            let crumb = self.auth_manager.get_crumb(&self.http_client).await?;
+            let _ = self.fetch_crumb().await;
+            let crumb = self.fetch_crumb().await?;
 
             let base_endpoint = endpoint.split("&crumb=").next().unwrap_or(endpoint);
             let new_endpoint = format!(
@@ -1296,7 +1350,7 @@ impl YahooAdapter {
         &self,
         req: &crate::data_source::EarningsRequest,
     ) -> Result<crate::data_source::EarningsBatch, SourceError> {
-        let crumb = self.auth_manager.get_crumb(&self.http_client).await?;
+        let crumb = self.fetch_crumb().await?;
 
         let endpoint = format!(
             "https://query1.finance.yahoo.com/v10/finance/quoteSummary/{}?modules=earnings,earningsTrend&crumb={}",
@@ -1465,7 +1519,7 @@ struct YahooQuoteSummaryData {
 #[derive(Debug, Clone, Deserialize)]
 struct YahooQuoteSummaryResult {
     #[serde(default)]
-    meta: Option<YahooMeta>,
+    _meta: Option<YahooMeta>,
     #[serde(rename = "price", default)]
     price: Option<YahooPriceData>,
     #[serde(rename = "summaryDetail", default)]
@@ -1476,7 +1530,8 @@ struct YahooQuoteSummaryResult {
 
 #[derive(Debug, Clone, Deserialize)]
 struct YahooMeta {
-    symbol: String,
+    #[serde(rename = "symbol")]
+    _symbol: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1500,7 +1555,7 @@ struct YahooDefaultKeyStatisticsData {
     #[serde(rename = "marketCap", default)]
     market_cap: Option<YahooRawValue>,
     #[serde(rename = "forwardPE", default)]
-    forward_pe: Option<YahooRawValue>,
+    _forward_pe: Option<YahooRawValue>,
     #[serde(rename = "PE_RATIO", default)]
     pe_ratio: Option<YahooRawValue>,
     #[serde(rename = "dividendYield", default)]
@@ -1719,8 +1774,11 @@ mod tests {
     #[ignore = "Requires real auth flow - was testing mock mode"]
     fn circuit_breaker_opens_after_repeated_transport_failures() {
         let client = Arc::new(RecordingHttpClient::failure());
-        let adapter =
-            YahooAdapter::with_http_client(client, HttpAuth::Cookie(String::from("B=session")));
+        let adapter = YahooAdapter::with_http_client(
+            client,
+            HttpAuth::Cookie(String::from("B=session")),
+            None,
+        );
         let request = QuoteRequest::new(vec![Symbol::parse("MSFT").expect("valid symbol")])
             .expect("valid request");
 

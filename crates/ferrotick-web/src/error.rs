@@ -3,6 +3,7 @@ use serde_json::json;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
+#[allow(dead_code)]
 pub enum WebError {
     #[error("Backtest error: {0}")]
     Backtest(String),

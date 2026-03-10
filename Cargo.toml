@@ -11,6 +11,7 @@ members = [
   "crates/ferrotick-strategies",
   "crates/ferrotick-trading",
   "crates/ferrotick-web",
+  "tests",
 ]
 resolver = "2"
 

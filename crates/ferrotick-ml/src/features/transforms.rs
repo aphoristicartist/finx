@@ -16,6 +16,24 @@ pub fn simple_returns(values: &[f64], period: usize) -> Vec<Option<f64>> {
     output
 }
 
+pub fn forward_simple_returns(values: &[f64], period: usize) -> Vec<Option<f64>> {
+    if period == 0 {
+        return vec![None; values.len()];
+    }
+
+    let mut output = vec![None; values.len()];
+    for index in 0..values.len().saturating_sub(period) {
+        let curr = values[index];
+        if curr == 0.0 {
+            output[index] = None;
+        } else {
+            output[index] = Some((values[index + period] - curr) / curr);
+        }
+    }
+
+    output
+}
+
 pub fn log_returns(values: &[f64], period: usize) -> Vec<Option<f64>> {
     if period == 0 {
         return vec![None; values.len()];
@@ -85,4 +103,28 @@ pub fn min_max(values: &[Option<f64>]) -> Vec<Option<f64>> {
             None => None,
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::forward_simple_returns;
+
+    #[test]
+    fn forward_simple_returns_uses_future_period() {
+        let values = [100.0, 110.0, 99.0];
+        let returns = forward_simple_returns(&values, 1);
+
+        assert_eq!(returns.len(), 3);
+        assert_eq!(returns[0], Some(0.1));
+        assert_eq!(returns[1], Some(-0.1));
+        assert_eq!(returns[2], None);
+    }
+
+    #[test]
+    fn forward_simple_returns_handles_zero_period() {
+        let values = [100.0, 101.0];
+        let returns = forward_simple_returns(&values, 0);
+
+        assert_eq!(returns, vec![None, None]);
+    }
 }

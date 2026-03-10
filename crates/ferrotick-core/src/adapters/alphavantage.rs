@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
+use crate::cache::CacheStore;
 use crate::circuit_breaker::{CircuitBreaker, CircuitState};
 use crate::data_source::{
     BarsRequest, CapabilitySet, DataSource, FundamentalsBatch, FundamentalsRequest, HealthState,
@@ -14,7 +15,7 @@ use crate::provider_policy::ProviderPolicy;
 use crate::throttling::ThrottlingQueue;
 use crate::{
     AssetClass, Bar, BarSeries, Fundamental, Instrument, Interval, ProviderId, Quote, Symbol,
-    UtcDateTime, ValidationError,
+    UtcDateTime,
 };
 
 /// Alpha Vantage adapter for real API calls.
@@ -27,11 +28,16 @@ pub struct AlphaVantageAdapter {
     api_key: String,
     circuit_breaker: Arc<CircuitBreaker>,
     throttling: ThrottlingQueue,
+    cache: CacheStore,
 }
 
 impl AlphaVantageAdapter {
     /// Create a new AlphaVantageAdapter with a real HTTP client and API key.
-    pub fn with_http_client(http_client: Arc<dyn HttpClient>, api_key: impl Into<String>) -> Self {
+    pub fn with_http_client(
+        http_client: Arc<dyn HttpClient>,
+        api_key: impl Into<String>,
+        cache: Option<CacheStore>,
+    ) -> Self {
         let policy = ProviderPolicy::alphavantage_default();
         Self {
             health_state: HealthState::Healthy,
@@ -41,6 +47,7 @@ impl AlphaVantageAdapter {
             api_key: api_key.into(),
             circuit_breaker: Arc::new(CircuitBreaker::default()),
             throttling: ThrottlingQueue::from_policy(&policy),
+            cache: cache.unwrap_or_else(CacheStore::with_default_ttl),
         }
     }
 
@@ -49,11 +56,11 @@ impl AlphaVantageAdapter {
         circuit_breaker: Arc<CircuitBreaker>,
         http_client: Arc<dyn HttpClient>,
         api_key: impl Into<String>,
+        cache: Option<CacheStore>,
     ) -> Self {
-        let policy = ProviderPolicy::alphavantage_default();
         Self {
             circuit_breaker,
-            ..Self::with_http_client(http_client, api_key)
+            ..Self::with_http_client(http_client, api_key, cache)
         }
     }
 
@@ -67,13 +74,27 @@ impl AlphaVantageAdapter {
             circuit_breaker,
             Arc::new(crate::http_client::ReqwestHttpClient::new()),
             api_key,
+            None,
         )
+    }
+
+    fn bars_cache_key(symbol: &Symbol, interval: Interval, limit: usize) -> String {
+        format!("bars:{}:{}:{}", symbol.as_str(), interval.as_str(), limit)
+    }
+
+    fn quote_cache_key(symbol: &Symbol) -> String {
+        format!("quote:{}", symbol.as_str())
     }
 }
 
 // Real API implementation methods
 impl AlphaVantageAdapter {
     async fn fetch_real_quotes(&self, req: &QuoteRequest) -> Result<QuoteBatch, SourceError> {
+        let cache_key = Self::quote_cache_key(&req.symbols[0]);
+        if let Some(cached_body) = self.cache.get(&cache_key).await {
+            return self.parse_quote_response(req, &cached_body);
+        }
+
         if !self.circuit_breaker.allow_request() {
             return Err(SourceError::unavailable(
                 "alphavantage circuit breaker is open",
@@ -112,39 +133,17 @@ impl AlphaVantageAdapter {
 
         self.throttling.complete_one();
         self.circuit_breaker.record_success();
-
-        // Parse Alpha Vantage response
-        let av_response: AlphaVantageQuoteResponse =
-            serde_json::from_str(&response.body).map_err(|e| {
-                SourceError::internal(format!("failed to parse alphavantage response: {}", e))
-            })?;
-
-        if av_response.quote.is_none() {
-            return Err(SourceError::unavailable(
-                "no quote data in alphavantage response",
-            ));
-        }
-
-        let quote_data = av_response.quote.unwrap();
-        let as_of = UtcDateTime::now();
-
-        let quote = Quote::new(
-            req.symbols[0].clone(),
-            quote_data.price,
-            None,
-            None,
-            None,
-            "USD",
-            as_of,
-        )
-        .map_err(|e| SourceError::internal(e.to_string()))?;
-
-        Ok(QuoteBatch {
-            quotes: vec![quote],
-        })
+        let quote_batch = self.parse_quote_response(req, &response.body)?;
+        self.cache.put(cache_key, response.body, None).await;
+        Ok(quote_batch)
     }
 
     async fn fetch_real_bars(&self, req: &BarsRequest) -> Result<BarSeries, SourceError> {
+        let cache_key = Self::bars_cache_key(&req.symbol, req.interval, req.limit);
+        if let Some(cached_body) = self.cache.get(&cache_key).await {
+            return self.parse_bars_response(req, &cached_body);
+        }
+
         if !self.circuit_breaker.allow_request() {
             return Err(SourceError::unavailable(
                 "alphavantage circuit breaker is open",
@@ -191,51 +190,9 @@ impl AlphaVantageAdapter {
 
         self.throttling.complete_one();
         self.circuit_breaker.record_success();
-
-        let av_response: AlphaVantageTimeSeriesResponse = serde_json::from_str(&response.body)
-            .map_err(|e| {
-                SourceError::internal(format!("failed to parse alphavantage bars: {}", e))
-            })?;
-
-        let time_series = av_response
-            .get_time_series()
-            .ok_or_else(|| SourceError::internal("no time series data in response"))?;
-
-        let mut bars = Vec::new();
-        for (timestamp_str, bar_data) in time_series.into_iter().take(req.limit) {
-            // Parse ISO timestamp like "2025-01-14 16:00:00"
-            let ts_offset = time::OffsetDateTime::parse(
-                &timestamp_str,
-                &time::format_description::well_known::Iso8601::DEFAULT,
-            )
-            .or_else(|_| {
-                time::OffsetDateTime::parse(
-                    &timestamp_str,
-                    &time::format_description::parse(
-                        "[year]-[month]-[day] [hour]:[minute]:[second]",
-                    )
-                    .unwrap(),
-                )
-            })
-            .map_err(|e| SourceError::internal(format!("invalid timestamp: {}", e)))?;
-            let ts = UtcDateTime::from_offset_datetime(ts_offset)
-                .map_err(|e| SourceError::internal(format!("timestamp not UTC: {}", e)))?;
-
-            if let Ok(bar) = Bar::new(
-                ts,
-                bar_data.open,
-                bar_data.high,
-                bar_data.low,
-                bar_data.close,
-                bar_data.volume.map(|v| v as u64),
-                None,
-            ) {
-                bars.push(bar);
-            }
-        }
-
-        bars.reverse(); // Alpha Vantage returns newest first, we want oldest first
-        Ok(BarSeries::new(req.symbol.clone(), req.interval, bars))
+        let series = self.parse_bars_response(req, &response.body)?;
+        self.cache.put(cache_key, response.body, None).await;
+        Ok(series)
     }
 
     async fn fetch_real_fundamentals(
@@ -262,7 +219,7 @@ impl AlphaVantageAdapter {
             .iter()
             .map(|symbol| Fundamental::new(symbol.clone(), as_of, None, None, None))
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e: ValidationError| SourceError::internal(e.to_string()))?;
+            .map_err(|e| SourceError::internal(e.to_string()))?;
 
         Ok(FundamentalsBatch { fundamentals })
     }
@@ -343,6 +300,92 @@ impl AlphaVantageAdapter {
             query: req.query.clone(),
             results,
         })
+    }
+
+    fn parse_quote_response(
+        &self,
+        req: &QuoteRequest,
+        body: &str,
+    ) -> Result<QuoteBatch, SourceError> {
+        let av_response: AlphaVantageQuoteResponse = serde_json::from_str(body).map_err(|e| {
+            SourceError::internal(format!("failed to parse alphavantage response: {}", e))
+        })?;
+
+        if av_response.quote.is_none() {
+            return Err(SourceError::unavailable(
+                "no quote data in alphavantage response",
+            ));
+        }
+
+        let quote_data = av_response.quote.unwrap();
+        let as_of = UtcDateTime::now();
+        let bid = quote_data
+            .bid
+            .unwrap_or_else(|| (quote_data.price - 0.05).max(0.0));
+        let ask = quote_data.ask.unwrap_or(quote_data.price + 0.05);
+
+        let quote = Quote::new(
+            req.symbols[0].clone(),
+            quote_data.price,
+            Some(bid),
+            Some(ask),
+            quote_data.volume.map(|v| v as u64).or(Some(0)),
+            "USD",
+            as_of,
+        )
+        .map_err(|e| SourceError::internal(e.to_string()))?;
+
+        Ok(QuoteBatch {
+            quotes: vec![quote],
+        })
+    }
+
+    fn parse_bars_response(&self, req: &BarsRequest, body: &str) -> Result<BarSeries, SourceError> {
+        let av_response: AlphaVantageTimeSeriesResponse =
+            serde_json::from_str(body).map_err(|e| {
+                SourceError::internal(format!("failed to parse alphavantage bars: {}", e))
+            })?;
+
+        let time_series = av_response
+            .get_time_series()
+            .ok_or_else(|| SourceError::internal("no time series data in response"))?;
+
+        let plain_timestamp_format =
+            time::format_description::parse("[year]-[month]-[day] [hour]:[minute]:[second]")
+                .map_err(|e| {
+                    SourceError::internal(format!("invalid timestamp format parser: {}", e))
+                })?;
+
+        let mut bars = Vec::new();
+        for (timestamp_str, bar_data) in time_series.into_iter().take(req.limit) {
+            // Parse ISO timestamp like "2025-01-14 16:00:00"
+            let ts_offset = time::OffsetDateTime::parse(
+                &timestamp_str,
+                &time::format_description::well_known::Iso8601::DEFAULT,
+            )
+            .or_else(|_| {
+                time::PrimitiveDateTime::parse(&timestamp_str, &plain_timestamp_format)
+                    .map(|dt| dt.assume_utc())
+            })
+            .map_err(|e| SourceError::internal(format!("invalid timestamp: {}", e)))?;
+            let ts = UtcDateTime::from_offset_datetime(ts_offset)
+                .map_err(|e| SourceError::internal(format!("timestamp not UTC: {}", e)))?;
+
+            if let Ok(bar) = Bar::new(
+                ts,
+                bar_data.open,
+                bar_data.high,
+                bar_data.low,
+                bar_data.close,
+                bar_data.volume.map(|v| v as u64),
+                None,
+            ) {
+                bars.push(bar);
+            }
+        }
+
+        bars.reverse(); // Alpha Vantage returns newest first, we want oldest first
+        Ok(BarSeries::new(req.symbol.clone(), req.interval, bars))
     }
 }
 
@@ -488,6 +531,12 @@ struct AlphaVantageQuoteResponse {
 struct AlphaVantageQuoteData {
     #[serde(rename = "05. price")]
     price: f64,
+    #[serde(rename = "06. volume", default)]
+    volume: Option<i64>,
+    #[serde(rename = "08. bid price", default)]
+    bid: Option<f64>,
+    #[serde(rename = "09. ask price", default)]
+    ask: Option<f64>,
 }
 
 /// Alpha Vantage returns time series with dynamic field names based on interval
@@ -547,10 +596,6 @@ struct AlphaVantageSearchMatch {
     currency: Option<String>,
 }
 
-fn validation_to_error(error: ValidationError) -> SourceError {
-    SourceError::internal(error.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -595,7 +640,7 @@ mod tests {
     #[test]
     fn circuit_breaker_marks_health_unhealthy_after_failures() {
         let client = Arc::new(RecordingHttpClient::failure());
-        let adapter = AlphaVantageAdapter::with_http_client(client, "demo-key");
+        let adapter = AlphaVantageAdapter::with_http_client(client, "demo-key", None);
         let request = QuoteRequest::new(vec![Symbol::parse("AAPL").expect("valid symbol")])
             .expect("valid request");
 

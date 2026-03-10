@@ -16,6 +16,34 @@ pub struct Signal {
     pub strength: f64,
     pub reason: String,
     pub strategy_name: String,
+    #[serde(default)]
+    pub source_strategy_id: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct OrderExecutionContext {
+    pub portfolio_value: f64,
+    pub price: f64,
+}
+
+impl OrderExecutionContext {
+    pub fn new(portfolio_value: f64, price: f64) -> Self {
+        Self {
+            portfolio_value,
+            price,
+        }
+    }
+}
+
+impl Default for OrderExecutionContext {
+    fn default() -> Self {
+        Self {
+            // NaN defaults make sizing wrappers fall back to strategy-native quantity
+            // unless the caller provides explicit execution context.
+            portfolio_value: f64::NAN,
+            price: f64::NAN,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,6 +80,13 @@ pub trait Strategy: Send + Sync {
     fn name(&self) -> &str;
     fn on_bar(&mut self, bar: &Bar) -> Option<Signal>;
     fn on_signal(&mut self, signal: &Signal) -> Option<Order>;
+    fn on_signal_with_context(
+        &mut self,
+        signal: &Signal,
+        _ctx: &OrderExecutionContext,
+    ) -> Option<Order> {
+        self.on_signal(signal)
+    }
     fn reset(&mut self);
 }
 

@@ -4,9 +4,10 @@ use serde::{Deserialize, Serialize};
 use crate::portfolio::OrderSide;
 
 /// Slippage models used during simulated execution.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(tag = "model", rename_all = "snake_case")]
 pub enum SlippageModel {
+    #[default]
     None,
     FixedBps {
         bps: f64,
@@ -15,12 +16,6 @@ pub enum SlippageModel {
         max_volume_share: f64,
         max_impact_bps: f64,
     },
-}
-
-impl Default for SlippageModel {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 impl SlippageModel {

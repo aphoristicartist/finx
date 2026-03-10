@@ -7,17 +7,9 @@ pub use fees::FeeModel;
 pub use slippage::SlippageModel;
 
 /// Transaction cost configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TransactionCosts {
     pub fee_model: FeeModel,
-}
-
-impl Default for TransactionCosts {
-    fn default() -> Self {
-        Self {
-            fee_model: FeeModel::default(),
-        }
-    }
 }
 
 impl TransactionCosts {

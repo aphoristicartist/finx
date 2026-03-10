@@ -106,6 +106,7 @@ pub fn compute_atr(bars: &[Bar], period: usize) -> MlResult<Vec<Option<f64>>> {
             .high(bar.high)
             .low(bar.low)
             .close(bar.close)
+            .open(bar.open)
             .volume(bar.volume.unwrap_or(0) as f64)
             .build()
             .map_err(|err| MlError::Compute(err.to_string()))?;

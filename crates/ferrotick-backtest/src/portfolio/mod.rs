@@ -18,6 +18,7 @@ const POSITION_EPSILON: f64 = 1e-12;
 /// Portfolio state used by the backtest engine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Portfolio {
+    initial_capital: f64,
     cash: CashLedger,
     positions: HashMap<Symbol, Position>,
     last_prices: HashMap<Symbol, f64>,
@@ -30,6 +31,7 @@ pub struct Portfolio {
 impl Portfolio {
     pub fn new(initial_capital: f64) -> Self {
         Self {
+            initial_capital,
             cash: CashLedger::new(initial_capital),
             positions: HashMap::new(),
             last_prices: HashMap::new(),
@@ -41,7 +43,7 @@ impl Portfolio {
     }
 
     pub fn reset(&mut self) {
-        *self = Self::new(0.0);
+        *self = Self::new(self.initial_capital);
     }
 
     pub fn update_price(&mut self, symbol: &Symbol, price: f64) {

@@ -1,18 +1,100 @@
 use linfa::prelude::*;
 use linfa_svm::Svm;
 use ndarray::{Array1, Array2};
+use serde::{Deserialize, Serialize};
+use std::path::Path;
 
-use super::Model;
+use super::{Model, PersistentModel};
 use crate::{MlError, MlResult};
+
+#[derive(Clone)]
+struct TrainingSnapshot {
+    features: Array2<f64>,
+    targets: Array1<f64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct SerializableMatrix {
+    nrows: usize,
+    ncols: usize,
+    values: Vec<f64>,
+}
+
+impl SerializableMatrix {
+    fn from_array2(array: &Array2<f64>) -> Self {
+        Self {
+            nrows: array.nrows(),
+            ncols: array.ncols(),
+            values: array.iter().copied().collect(),
+        }
+    }
+
+    fn into_array2(self) -> MlResult<Array2<f64>> {
+        let expected_len = self.nrows.checked_mul(self.ncols).ok_or_else(|| {
+            MlError::InvalidInput(String::from("serialized matrix shape overflow"))
+        })?;
+
+        if self.values.len() != expected_len {
+            return Err(MlError::InvalidInput(format!(
+                "serialized matrix length mismatch: expected {}, got {}",
+                expected_len,
+                self.values.len()
+            )));
+        }
+
+        Array2::from_shape_vec((self.nrows, self.ncols), self.values)
+            .map_err(|e| MlError::InvalidInput(format!("invalid serialized matrix: {}", e)))
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct SerializableTrainingSnapshot {
+    features: SerializableMatrix,
+    targets: Vec<f64>,
+}
+
+impl SerializableTrainingSnapshot {
+    fn from_training_data(training_data: &TrainingSnapshot) -> Self {
+        Self {
+            features: SerializableMatrix::from_array2(&training_data.features),
+            targets: training_data.targets.to_vec(),
+        }
+    }
+
+    fn into_training_data(self) -> MlResult<TrainingSnapshot> {
+        let features = self.features.into_array2()?;
+        if self.targets.len() != features.nrows() {
+            return Err(MlError::InvalidInput(format!(
+                "serialized target length mismatch: expected {}, got {}",
+                features.nrows(),
+                self.targets.len()
+            )));
+        }
+
+        Ok(TrainingSnapshot {
+            features,
+            targets: Array1::from_vec(self.targets),
+        })
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct SerializableSvm {
+    training_data: SerializableTrainingSnapshot,
+}
 
 /// SVM-based signal classifier.
 pub struct SVMClassifier {
     model: Option<Svm<f64, bool>>,
+    training_data: Option<TrainingSnapshot>,
 }
 
 impl SVMClassifier {
     pub fn new() -> Self {
-        Self { model: None }
+        Self {
+            model: None,
+            training_data: None,
+        }
     }
 
     /// Train the SVM classifier.
@@ -30,6 +112,10 @@ impl SVMClassifier {
             .map_err(|e| MlError::Training(format!("SVM training failed: {}", e)))?;
 
         self.model = Some(model);
+        self.training_data = Some(TrainingSnapshot {
+            features: features.clone(),
+            targets: targets.clone(),
+        });
         Ok(())
     }
 
@@ -41,7 +127,7 @@ impl SVMClassifier {
             .ok_or_else(|| MlError::Prediction(String::from("model not trained")))?;
 
         // Create a dataset with dummy labels for prediction
-        let dummy_labels = Array1::from_elem(features.len(), false);
+        let dummy_labels = Array1::from_elem(1, false);
         let features_2d = features.view().insert_axis(ndarray::Axis(0));
         let dataset = linfa::Dataset::new(features_2d.to_owned(), dummy_labels);
 
@@ -63,6 +149,38 @@ impl SVMClassifier {
 
         let predictions = model.predict(&dataset);
         Ok(predictions)
+    }
+
+    /// Persist the model to disk by storing the training snapshot as JSON.
+    pub fn save(&self, path: &Path) -> Result<(), MlError> {
+        if self.model.is_none() {
+            return Err(MlError::InvalidInput(String::from(
+                "cannot save untrained model",
+            )));
+        }
+
+        let training_data = self.training_data.as_ref().ok_or_else(|| {
+            MlError::InvalidInput(String::from("missing training data for model persistence"))
+        })?;
+
+        let serializable = SerializableSvm {
+            training_data: SerializableTrainingSnapshot::from_training_data(training_data),
+        };
+
+        let json = serde_json::to_string_pretty(&serializable)?;
+        std::fs::write(path, json)?;
+        Ok(())
+    }
+
+    /// Load the model from disk and reconstruct the trained classifier.
+    pub fn load(path: &Path) -> Result<Self, MlError> {
+        let json = std::fs::read_to_string(path)?;
+        let serializable: SerializableSvm = serde_json::from_str(&json)?;
+        let training_data = serializable.training_data.into_training_data()?;
+
+        let mut classifier = Self::new();
+        classifier.train(&training_data.features, &training_data.targets)?;
+        Ok(classifier)
     }
 }
 
@@ -94,5 +212,15 @@ impl Model for SVMClassifier {
         let bool_predictions = model.predict(&dataset);
         let predictions = bool_predictions.mapv(|b| if b { 1.0 } else { -1.0 });
         Ok(predictions)
+    }
+}
+
+impl PersistentModel for SVMClassifier {
+    fn save(&self, path: &Path) -> MlResult<()> {
+        SVMClassifier::save(self, path)
+    }
+
+    fn load(path: &Path) -> MlResult<Self> {
+        SVMClassifier::load(path)
     }
 }

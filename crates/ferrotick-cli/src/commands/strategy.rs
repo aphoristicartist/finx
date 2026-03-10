@@ -1,6 +1,5 @@
 use crate::cli::{StrategyArgs, StrategyBacktestArgs, StrategyCommand, StrategyValidateArgs};
 use crate::error::CliError;
-use ferrotick_strategies::strategies::StrategyDescriptor;
 use ferrotick_strategies::{built_in_strategies, parse_and_validate_file};
 
 pub async fn run(args: &StrategyArgs) -> Result<(), CliError> {

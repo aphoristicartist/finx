@@ -1,5 +1,5 @@
 use ferrotick_core::{Bar, UtcDateTime};
-use ferrotick_strategies::dsl::parse_and_validate_strategy_yaml;
+use ferrotick_strategies::dsl::{parse_and_validate_strategy_yaml, RuleValue};
 use ferrotick_strategies::sizing::position::{
     FixedSizer, PercentSizer, PositionSizer, PositionSizingContext,
 };
@@ -7,11 +7,50 @@ use ferrotick_strategies::strategies::{
     BollingerBandSqueezeStrategy, MacdTrendStrategy, MovingAverageCrossoverStrategy,
     RsiMeanReversionStrategy,
 };
-use ferrotick_strategies::traits::strategy::{SignalAction, Strategy};
+use ferrotick_strategies::traits::strategy::{OrderSide, Signal, SignalAction, Strategy};
+
+const EXPECTED_MAX_HISTORY: usize = 1000;
 
 fn make_bar(close: f64, ts_days: i64) -> Bar {
     let ts = UtcDateTime::from_unix_timestamp(ts_days * 86400).expect("valid timestamp");
     Bar::new(ts, close, close, close, close, Some(1000), None).expect("valid bar")
+}
+
+fn make_signal(symbol: &str, action: SignalAction) -> Signal {
+    Signal {
+        symbol: symbol.to_string(),
+        ts: "2024-01-01T00:00:00Z".to_string(),
+        action,
+        strength: 1.0,
+        reason: "test".to_string(),
+        strategy_name: "test".to_string(),
+        source_strategy_id: "test".to_string(),
+    }
+}
+
+fn extract_closes_from_debug(debug_repr: &str) -> Vec<f64> {
+    let marker = "closes: [";
+    let start = debug_repr
+        .find(marker)
+        .expect("debug output must contain closes");
+    let rest = &debug_repr[start + marker.len()..];
+    let end = rest
+        .find(']')
+        .expect("debug output must contain closing bracket");
+    let raw_values = rest[..end].trim();
+    if raw_values.is_empty() {
+        return Vec::new();
+    }
+
+    raw_values
+        .split(',')
+        .map(|value| {
+            value
+                .trim()
+                .parse::<f64>()
+                .expect("close value should parse as f64")
+        })
+        .collect()
 }
 
 // ============================================================================
@@ -20,10 +59,24 @@ fn make_bar(close: f64, ts_days: i64) -> Bar {
 
 #[test]
 fn test_ma_crossover_construction() {
-    let strategy = MovingAverageCrossoverStrategy::new("AAPL", 5, 10, 1.0);
-    assert!(strategy.is_ok());
-    let strategy = strategy.unwrap();
+    let mut strategy = MovingAverageCrossoverStrategy::new("AAPL", 5, 10, 1.0).unwrap();
     assert_eq!(strategy.name(), "ma_crossover");
+
+    let debug = format!("{strategy:?}");
+    assert!(debug.contains("symbol: \"AAPL\""));
+    assert!(debug.contains("fast_period: 5"));
+    assert!(debug.contains("slow_period: 10"));
+    assert!(debug.contains("order_quantity: 1.0"));
+    assert!(debug.contains("closes: []"));
+    assert!(debug.contains("prev_fast: None"));
+    assert!(debug.contains("prev_slow: None"));
+
+    let order = strategy
+        .on_signal(&make_signal("AAPL", SignalAction::Buy))
+        .expect("buy signal should produce order");
+    assert_eq!(order.symbol, "AAPL");
+    assert_eq!(order.side, OrderSide::Buy);
+    assert_eq!(order.quantity, 1.0);
 }
 
 #[test]
@@ -43,42 +96,68 @@ fn test_ma_crossover_invalid_params() {
 #[test]
 fn test_ma_crossover_warmup() {
     let mut strategy = MovingAverageCrossoverStrategy::new("AAPL", 5, 10, 1.0).unwrap();
+    let warmup_period = 10usize;
 
-    // Should return None during warmup
-    for i in 0..9 {
-        let bar = make_bar(100.0 + i as f64, i);
+    // No signal until exactly slow_period bars are available.
+    for i in 0..(warmup_period - 1) {
+        let bar = make_bar(100.0 + i as f64, i as i64);
         assert!(strategy.on_bar(&bar).is_none());
     }
 
-    // Should return a signal after warmup
-    let bar = make_bar(110.0, 10);
-    let signal = strategy.on_bar(&bar);
-    assert!(signal.is_some());
-    let signal = signal.unwrap();
-    assert_eq!(signal.strategy_name, "ma_crossover");
+    let first_post_warmup = strategy
+        .on_bar(&make_bar(109.0, (warmup_period - 1) as i64))
+        .expect("signal should be emitted at warmup boundary");
+    assert_eq!(first_post_warmup.strategy_name, "ma_crossover");
+    assert_eq!(first_post_warmup.action, SignalAction::Hold);
+    assert!(first_post_warmup.reason.contains("fast_sma="));
+    assert!(first_post_warmup.reason.contains("slow_sma="));
+
+    let next_signal = strategy
+        .on_bar(&make_bar(110.0, warmup_period as i64))
+        .expect("signal should continue after warmup");
+    assert_eq!(next_signal.strategy_name, "ma_crossover");
 }
 
 #[test]
 fn test_ma_crossover_golden_cross() {
     let mut strategy = MovingAverageCrossoverStrategy::new("AAPL", 3, 5, 1.0).unwrap();
 
-    // Build initial data
-    for i in 0..5 {
-        let bar = make_bar(100.0, i);
-        let _ = strategy.on_bar(&bar);
+    // Sequence engineered to trigger one sell crossover followed by one buy crossover.
+    let closes = [
+        100.0, 101.0, 102.0, 103.0, 104.0, 100.0, 96.0, 92.0, 88.0, 92.0, 96.0, 100.0, 104.0,
+    ];
+
+    let mut buy_count = 0;
+    let mut sell_count = 0;
+    let mut crossover_points = Vec::new();
+
+    for (i, close) in closes.iter().enumerate() {
+        let bar = make_bar(*close, i as i64);
+        if let Some(signal) = strategy.on_bar(&bar) {
+            match signal.action {
+                SignalAction::Buy => {
+                    buy_count += 1;
+                    crossover_points.push((i, SignalAction::Buy));
+                }
+                SignalAction::Sell => {
+                    sell_count += 1;
+                    crossover_points.push((i, SignalAction::Sell));
+                }
+                SignalAction::Hold => {}
+            }
+        }
     }
 
-    // Now drop price to create death cross
-    for i in 5..10 {
-        let bar = make_bar(90.0, i);
-        let _ = strategy.on_bar(&bar);
-    }
-
-    // Now rally to create golden cross (fast > slow)
-    let bar = make_bar(120.0, 10);
-    let signal = strategy.on_bar(&bar);
-    // Signal depends on previous state, should generate something
-    assert!(signal.is_some());
+    assert_eq!(
+        sell_count, 1,
+        "expected exactly one death cross sell signal"
+    );
+    assert_eq!(buy_count, 1, "expected exactly one golden cross buy signal");
+    assert_eq!(
+        crossover_points,
+        vec![(6, SignalAction::Sell), (11, SignalAction::Buy)],
+        "signals should occur at expected crossover bars"
+    );
 }
 
 // ============================================================================
@@ -87,10 +166,23 @@ fn test_ma_crossover_golden_cross() {
 
 #[test]
 fn test_rsi_construction() {
-    let strategy = RsiMeanReversionStrategy::new("AAPL", 14, 30.0, 70.0, 1.0);
-    assert!(strategy.is_ok());
-    let strategy = strategy.unwrap();
+    let mut strategy = RsiMeanReversionStrategy::new("AAPL", 14, 30.0, 70.0, 1.0).unwrap();
     assert_eq!(strategy.name(), "rsi_mean_reversion");
+
+    let debug = format!("{strategy:?}");
+    assert!(debug.contains("symbol: \"AAPL\""));
+    assert!(debug.contains("period: 14"));
+    assert!(debug.contains("oversold: 30.0"));
+    assert!(debug.contains("overbought: 70.0"));
+    assert!(debug.contains("order_quantity: 1.0"));
+    assert!(debug.contains("closes: []"));
+
+    let order = strategy
+        .on_signal(&make_signal("AAPL", SignalAction::Sell))
+        .expect("sell signal should produce order");
+    assert_eq!(order.symbol, "AAPL");
+    assert_eq!(order.side, OrderSide::Sell);
+    assert_eq!(order.quantity, 1.0);
 }
 
 #[test]
@@ -110,19 +202,24 @@ fn test_rsi_invalid_params() {
 #[test]
 fn test_rsi_warmup() {
     let mut strategy = RsiMeanReversionStrategy::new("AAPL", 14, 30.0, 70.0, 1.0).unwrap();
+    let warmup_period = 14usize;
 
-    // Should return None during warmup
-    for i in 0..13 {
-        let bar = make_bar(100.0, i);
+    for i in 0..(warmup_period - 1) {
+        let close = if i % 2 == 0 { 100.0 } else { 101.0 };
+        let bar = make_bar(close, i as i64);
         assert!(strategy.on_bar(&bar).is_none());
     }
 
-    // Should return a signal after warmup
-    let bar = make_bar(100.0, 14);
-    let signal = strategy.on_bar(&bar);
-    assert!(signal.is_some());
-    let signal = signal.unwrap();
-    assert_eq!(signal.strategy_name, "rsi_mean_reversion");
+    let first_post_warmup = strategy
+        .on_bar(&make_bar(100.0, (warmup_period - 1) as i64))
+        .expect("signal should be emitted at warmup boundary");
+    assert_eq!(first_post_warmup.strategy_name, "rsi_mean_reversion");
+    assert!(first_post_warmup.reason.starts_with("rsi="));
+
+    let next_signal = strategy
+        .on_bar(&make_bar(101.0, warmup_period as i64))
+        .expect("signal should continue after warmup");
+    assert_eq!(next_signal.strategy_name, "rsi_mean_reversion");
 }
 
 #[test]
@@ -148,10 +245,25 @@ fn test_rsi_signal_provenance() {
 
 #[test]
 fn test_macd_construction() {
-    let strategy = MacdTrendStrategy::new("AAPL", 12, 26, 9, 1.0);
-    assert!(strategy.is_ok());
-    let strategy = strategy.unwrap();
+    let mut strategy = MacdTrendStrategy::new("AAPL", 12, 26, 9, 1.0).unwrap();
     assert_eq!(strategy.name(), "macd_trend");
+
+    let debug = format!("{strategy:?}");
+    assert!(debug.contains("symbol: \"AAPL\""));
+    assert!(debug.contains("fast_period: 12"));
+    assert!(debug.contains("slow_period: 26"));
+    assert!(debug.contains("signal_period: 9"));
+    assert!(debug.contains("order_quantity: 1.0"));
+    assert!(debug.contains("closes: []"));
+    assert!(debug.contains("prev_macd: None"));
+    assert!(debug.contains("prev_signal: None"));
+
+    let order = strategy
+        .on_signal(&make_signal("AAPL", SignalAction::Buy))
+        .expect("buy signal should produce order");
+    assert_eq!(order.symbol, "AAPL");
+    assert_eq!(order.side, OrderSide::Buy);
+    assert_eq!(order.quantity, 1.0);
 }
 
 #[test]
@@ -170,19 +282,25 @@ fn test_macd_invalid_params() {
 #[test]
 fn test_macd_warmup() {
     let mut strategy = MacdTrendStrategy::new("AAPL", 5, 10, 3, 1.0).unwrap();
+    let warmup_period = 10 + 3 - 1;
 
-    // Warmup period is slow + signal - 1 = 10 + 3 - 1 = 12
-    for i in 0..11 {
-        let bar = make_bar(100.0, i);
+    for i in 0..(warmup_period - 1) {
+        let bar = make_bar(100.0, i as i64);
         assert!(strategy.on_bar(&bar).is_none());
     }
 
-    // Should return a signal after warmup
-    let bar = make_bar(100.0, 12);
-    let signal = strategy.on_bar(&bar);
-    assert!(signal.is_some());
-    let signal = signal.unwrap();
-    assert_eq!(signal.strategy_name, "macd_trend");
+    let first_post_warmup = strategy
+        .on_bar(&make_bar(100.0, (warmup_period - 1) as i64))
+        .expect("signal should be emitted at warmup boundary");
+    assert_eq!(first_post_warmup.strategy_name, "macd_trend");
+    assert_eq!(first_post_warmup.action, SignalAction::Hold);
+    assert!(first_post_warmup.reason.contains("macd="));
+    assert!(first_post_warmup.reason.contains("signal="));
+
+    let next_signal = strategy
+        .on_bar(&make_bar(100.0, warmup_period as i64))
+        .expect("signal should continue after warmup");
+    assert_eq!(next_signal.strategy_name, "macd_trend");
 }
 
 // ============================================================================
@@ -191,10 +309,23 @@ fn test_macd_warmup() {
 
 #[test]
 fn test_bb_squeeze_construction() {
-    let strategy = BollingerBandSqueezeStrategy::new("AAPL", 20, 2.0, 1.0);
-    assert!(strategy.is_ok());
-    let strategy = strategy.unwrap();
+    let mut strategy = BollingerBandSqueezeStrategy::new("AAPL", 20, 2.0, 1.0).unwrap();
     assert_eq!(strategy.name(), "bb_squeeze");
+
+    let debug = format!("{strategy:?}");
+    assert!(debug.contains("symbol: \"AAPL\""));
+    assert!(debug.contains("period: 20"));
+    assert!(debug.contains("num_std: 2.0"));
+    assert!(debug.contains("order_quantity: 1.0"));
+    assert!(debug.contains("closes: []"));
+    assert!(debug.contains("prev_in_squeeze: false"));
+
+    let order = strategy
+        .on_signal(&make_signal("AAPL", SignalAction::Sell))
+        .expect("sell signal should produce order");
+    assert_eq!(order.symbol, "AAPL");
+    assert_eq!(order.side, OrderSide::Sell);
+    assert_eq!(order.quantity, 1.0);
 }
 
 #[test]
@@ -211,19 +342,26 @@ fn test_bb_squeeze_invalid_params() {
 #[test]
 fn test_bb_squeeze_warmup() {
     let mut strategy = BollingerBandSqueezeStrategy::new("AAPL", 5, 2.0, 1.0).unwrap();
+    let warmup_period = 5usize;
 
-    // Should return None during warmup
-    for i in 0..4 {
-        let bar = make_bar(100.0, i);
+    for i in 0..(warmup_period - 1) {
+        let bar = make_bar(100.0, i as i64);
         assert!(strategy.on_bar(&bar).is_none());
     }
 
-    // Should return a signal after warmup
-    let bar = make_bar(100.0, 5);
-    let signal = strategy.on_bar(&bar);
-    assert!(signal.is_some());
-    let signal = signal.unwrap();
-    assert_eq!(signal.strategy_name, "bb_squeeze");
+    let first_post_warmup = strategy
+        .on_bar(&make_bar(100.0, (warmup_period - 1) as i64))
+        .expect("signal should be emitted at warmup boundary");
+    assert_eq!(first_post_warmup.strategy_name, "bb_squeeze");
+    assert_eq!(first_post_warmup.action, SignalAction::Hold);
+    assert!(first_post_warmup.reason.contains("bb_upper="));
+    assert!(first_post_warmup.reason.contains("bb_lower="));
+    assert!(first_post_warmup.reason.contains("bandwidth="));
+
+    let next_signal = strategy
+        .on_bar(&make_bar(100.0, warmup_period as i64))
+        .expect("signal should continue after warmup");
+    assert_eq!(next_signal.strategy_name, "bb_squeeze");
 }
 
 // ============================================================================
@@ -252,10 +390,34 @@ position_sizing:
   method: percent
   value: 0.1
 "#;
-    let spec = parse_and_validate_strategy_yaml(raw);
-    assert!(spec.is_ok());
-    let spec = spec.unwrap();
+    let spec = parse_and_validate_strategy_yaml(raw).expect("valid YAML should parse");
     assert_eq!(spec.name, "rsi_mean_reversion");
+    assert_eq!(spec.strategy_type, "mean_reversion");
+    assert_eq!(spec.timeframe, "1d");
+    assert_eq!(spec.entry_rules.len(), 1);
+    assert_eq!(spec.exit_rules.len(), 1);
+    assert_eq!(spec.position_sizing.method, "percent");
+    assert!((spec.position_sizing.value - 0.1).abs() < 1e-12);
+
+    let entry = &spec.entry_rules[0];
+    assert_eq!(entry.indicator, "rsi");
+    assert_eq!(entry.period, Some(14));
+    assert_eq!(entry.operator, "<");
+    match &entry.value {
+        RuleValue::Scalar(v) => assert!((*v - 30.0).abs() < 1e-12),
+        RuleValue::Range(_) => panic!("entry value should be scalar"),
+    }
+    assert_eq!(entry.action, "buy");
+
+    let exit = &spec.exit_rules[0];
+    assert_eq!(exit.indicator, "rsi");
+    assert_eq!(exit.period, Some(14));
+    assert_eq!(exit.operator, ">");
+    match &exit.value {
+        RuleValue::Scalar(v) => assert!((*v - 70.0).abs() < 1e-12),
+        RuleValue::Range(_) => panic!("exit value should be scalar"),
+    }
+    assert_eq!(exit.action, "sell");
 }
 
 #[test]
@@ -280,8 +442,25 @@ position_sizing:
   method: percent
   value: 0.1
 "#;
-    let spec = parse_and_validate_strategy_yaml(raw);
-    assert!(spec.is_ok());
+    let spec = parse_and_validate_strategy_yaml(raw).expect("valid range YAML should parse");
+    assert_eq!(spec.entry_rules.len(), 1);
+    assert_eq!(spec.exit_rules.len(), 1);
+
+    let entry = &spec.entry_rules[0];
+    match &entry.value {
+        RuleValue::Range([min, max]) => {
+            assert!((*min - 25.0).abs() < 1e-12);
+            assert!((*max - 35.0).abs() < 1e-12);
+        }
+        RuleValue::Scalar(_) => panic!("entry value should be parsed as range"),
+    }
+    assert!((entry.value.to_f64() - 30.0).abs() < 1e-12);
+
+    let exit = &spec.exit_rules[0];
+    match &exit.value {
+        RuleValue::Scalar(v) => assert!((*v - 70.0).abs() < 1e-12),
+        RuleValue::Range(_) => panic!("exit value should be scalar"),
+    }
 }
 
 #[test]
@@ -303,8 +482,27 @@ position_sizing:
   method: fixed
   value: 100
 "#;
-    let spec = parse_and_validate_strategy_yaml(raw);
-    assert!(spec.is_ok());
+    let spec =
+        parse_and_validate_strategy_yaml(raw).expect("YAML with optional fields should parse");
+    assert_eq!(spec.name, "test_strategy");
+    assert_eq!(spec.strategy_type, "ma_crossover");
+    assert_eq!(spec.timeframe, "1h");
+    assert_eq!(spec.entry_rules.len(), 1);
+    assert!(spec.exit_rules.is_empty());
+    assert_eq!(spec.position_sizing.method, "fixed");
+    assert!((spec.position_sizing.value - 100.0).abs() < 1e-12);
+
+    let entry = &spec.entry_rules[0];
+    assert_eq!(entry.name.as_deref(), Some("fast_cross"));
+    assert_eq!(entry.condition.as_deref(), Some("golden"));
+    assert_eq!(entry.indicator, "sma");
+    assert_eq!(entry.period, Some(10));
+    assert_eq!(entry.operator, ">");
+    match &entry.value {
+        RuleValue::Scalar(v) => assert!((*v - 100.0).abs() < 1e-12),
+        RuleValue::Range(_) => panic!("entry value should be scalar"),
+    }
+    assert_eq!(entry.action, "buy");
 }
 
 #[test]
@@ -319,8 +517,11 @@ position_sizing:
   method: invalid_method
   value: 100
 "#;
-    let result = parse_and_validate_strategy_yaml(raw);
-    assert!(result.is_err());
+    let error = parse_and_validate_strategy_yaml(raw)
+        .expect_err("invalid method should fail validation")
+        .to_string();
+    assert!(error.contains("position_sizing.method"));
+    assert!(error.contains("invalid method"));
 }
 
 #[test]
@@ -339,8 +540,11 @@ position_sizing:
   method: percent
   value: 0.1
 "#;
-    let result = parse_and_validate_strategy_yaml(raw);
-    assert!(result.is_err());
+    let error = parse_and_validate_strategy_yaml(raw)
+        .expect_err("invalid operator should fail validation")
+        .to_string();
+    assert!(error.contains("entry_rules[0].operator"));
+    assert!(error.contains("invalid operator"));
 }
 
 #[test]
@@ -359,8 +563,11 @@ position_sizing:
   method: percent
   value: 0.1
 "#;
-    let result = parse_and_validate_strategy_yaml(raw);
-    assert!(result.is_err());
+    let error = parse_and_validate_strategy_yaml(raw)
+        .expect_err("invalid action should fail validation")
+        .to_string();
+    assert!(error.contains("entry_rules[0].action"));
+    assert!(error.contains("invalid action"));
 }
 
 // ============================================================================
@@ -419,48 +626,78 @@ fn test_strategy_is_send_sync() {
 fn test_rsi_memory_bounds() {
     let mut strategy = RsiMeanReversionStrategy::new("AAPL", 14, 30.0, 70.0, 1.0).unwrap();
 
-    // Feed more than MAX_HISTORY bars
+    // Feed more than MAX_HISTORY bars so old data must be discarded.
     for i in 0..1500 {
-        let bar = make_bar(100.0 + (i as f64 % 10.0), i);
+        let bar = make_bar(i as f64, i as i64);
         let _ = strategy.on_bar(&bar);
     }
 
-    // Strategy should still work after 1500 bars
-    let bar = make_bar(100.0, 1500);
-    let signal = strategy.on_bar(&bar);
-    assert!(signal.is_some());
+    let closes = extract_closes_from_debug(&format!("{strategy:?}"));
+    assert_eq!(closes.len(), EXPECTED_MAX_HISTORY);
+    assert_eq!(closes.first().copied(), Some(500.0));
+    assert_eq!(closes.last().copied(), Some(1499.0));
+
+    let signal = strategy
+        .on_bar(&make_bar(1500.0, 1500))
+        .expect("strategy should continue producing signals");
+    assert_eq!(signal.strategy_name, "rsi_mean_reversion");
+
+    let closes = extract_closes_from_debug(&format!("{strategy:?}"));
+    assert_eq!(closes.len(), EXPECTED_MAX_HISTORY);
+    assert_eq!(closes.first().copied(), Some(501.0));
+    assert_eq!(closes.last().copied(), Some(1500.0));
 }
 
 #[test]
 fn test_macd_memory_bounds() {
     let mut strategy = MacdTrendStrategy::new("AAPL", 5, 10, 3, 1.0).unwrap();
 
-    // Feed more than MAX_HISTORY bars
+    // Feed more than MAX_HISTORY bars so old data must be discarded.
     for i in 0..1500 {
-        let bar = make_bar(100.0 + (i as f64 % 10.0), i);
+        let bar = make_bar(i as f64, i as i64);
         let _ = strategy.on_bar(&bar);
     }
 
-    // Strategy should still work after 1500 bars
-    let bar = make_bar(100.0, 1500);
-    let signal = strategy.on_bar(&bar);
-    assert!(signal.is_some());
+    let closes = extract_closes_from_debug(&format!("{strategy:?}"));
+    assert_eq!(closes.len(), EXPECTED_MAX_HISTORY);
+    assert_eq!(closes.first().copied(), Some(500.0));
+    assert_eq!(closes.last().copied(), Some(1499.0));
+
+    let signal = strategy
+        .on_bar(&make_bar(1500.0, 1500))
+        .expect("strategy should continue producing signals");
+    assert_eq!(signal.strategy_name, "macd_trend");
+
+    let closes = extract_closes_from_debug(&format!("{strategy:?}"));
+    assert_eq!(closes.len(), EXPECTED_MAX_HISTORY);
+    assert_eq!(closes.first().copied(), Some(501.0));
+    assert_eq!(closes.last().copied(), Some(1500.0));
 }
 
 #[test]
 fn test_bb_squeeze_memory_bounds() {
     let mut strategy = BollingerBandSqueezeStrategy::new("AAPL", 10, 2.0, 1.0).unwrap();
 
-    // Feed more than MAX_HISTORY bars
+    // Feed more than MAX_HISTORY bars so old data must be discarded.
     for i in 0..1500 {
-        let bar = make_bar(100.0 + (i as f64 % 10.0), i);
+        let bar = make_bar(i as f64, i as i64);
         let _ = strategy.on_bar(&bar);
     }
 
-    // Strategy should still work after 1500 bars
-    let bar = make_bar(100.0, 1500);
-    let signal = strategy.on_bar(&bar);
-    assert!(signal.is_some());
+    let closes = extract_closes_from_debug(&format!("{strategy:?}"));
+    assert_eq!(closes.len(), EXPECTED_MAX_HISTORY);
+    assert_eq!(closes.first().copied(), Some(500.0));
+    assert_eq!(closes.last().copied(), Some(1499.0));
+
+    let signal = strategy
+        .on_bar(&make_bar(1500.0, 1500))
+        .expect("strategy should continue producing signals");
+    assert_eq!(signal.strategy_name, "bb_squeeze");
+
+    let closes = extract_closes_from_debug(&format!("{strategy:?}"));
+    assert_eq!(closes.len(), EXPECTED_MAX_HISTORY);
+    assert_eq!(closes.first().copied(), Some(501.0));
+    assert_eq!(closes.last().copied(), Some(1500.0));
 }
 
 // ============================================================================
@@ -488,9 +725,11 @@ fn test_signal_generator_on_bar() {
     // Both strategies should produce signals with provenance
     for signal in &signals {
         assert!(!signal.strategy_name.is_empty());
+        assert!(!signal.source_strategy_id.is_empty());
         assert!(
             signal.strategy_name == "ma_crossover" || signal.strategy_name == "rsi_mean_reversion"
         );
+        assert_eq!(signal.strategy_name, signal.source_strategy_id);
     }
 }
 
@@ -508,12 +747,72 @@ fn test_signal_generator_on_signal() {
         action: SignalAction::Buy,
         strength: 1.0,
         reason: "test".to_string(),
-        strategy_name: "test".to_string(),
+        strategy_name: "ma_crossover".to_string(),
+        source_strategy_id: "ma_crossover".to_string(),
     };
 
     let orders = generator.on_signal(&signal);
     assert!(!orders.is_empty());
     assert_eq!(orders[0].symbol, "AAPL");
+}
+
+#[test]
+fn test_signal_generator_on_signal_routes_to_source_only() {
+    use ferrotick_strategies::signals::generator::SignalGenerator;
+    use ferrotick_strategies::traits::strategy::Signal;
+
+    let source_strategy = MovingAverageCrossoverStrategy::new("AAPL", 3, 5, 1.0).unwrap();
+    let other_strategy = RsiMeanReversionStrategy::new("AAPL", 5, 30.0, 70.0, 2.0).unwrap();
+    let mut generator =
+        SignalGenerator::new(vec![Box::new(source_strategy), Box::new(other_strategy)]);
+
+    let signal = Signal {
+        symbol: "AAPL".to_string(),
+        ts: "2024-01-01T00:00:00Z".to_string(),
+        action: SignalAction::Buy,
+        strength: 1.0,
+        reason: "test".to_string(),
+        strategy_name: "ma_crossover".to_string(),
+        source_strategy_id: "ma_crossover".to_string(),
+    };
+
+    let orders = generator.on_signal(&signal);
+    assert_eq!(orders.len(), 1);
+    assert_eq!(orders[0].symbol, "AAPL");
+    assert_eq!(orders[0].side, OrderSide::Buy);
+    assert_eq!(orders[0].quantity, 1.0);
+}
+
+#[test]
+fn test_signal_generator_handles_duplicate_strategy_names() {
+    use ferrotick_strategies::signals::generator::SignalGenerator;
+    use ferrotick_strategies::traits::strategy::Signal;
+
+    let strategy1 = MovingAverageCrossoverStrategy::new("AAPL", 3, 5, 1.0).unwrap();
+    let strategy2 = MovingAverageCrossoverStrategy::new("AAPL", 3, 5, 2.0).unwrap();
+    let mut generator = SignalGenerator::new(vec![Box::new(strategy1), Box::new(strategy2)]);
+
+    // Explicitly route to the second strategy instance.
+    let targeted = Signal {
+        symbol: "AAPL".to_string(),
+        ts: "2024-01-01T00:00:00Z".to_string(),
+        action: SignalAction::Buy,
+        strength: 1.0,
+        reason: "duplicate-name-target".to_string(),
+        strategy_name: "ma_crossover".to_string(),
+        source_strategy_id: "ma_crossover#2".to_string(),
+    };
+    let targeted_orders = generator.on_signal(&targeted);
+    assert_eq!(targeted_orders.len(), 1);
+    assert_eq!(targeted_orders[0].quantity, 2.0);
+
+    // Legacy fallback by strategy_name should fan out to all same-name strategies.
+    let fallback = Signal {
+        source_strategy_id: String::new(),
+        ..targeted
+    };
+    let fallback_orders = generator.on_signal(&fallback);
+    assert_eq!(fallback_orders.len(), 2);
 }
 
 // ============================================================================
@@ -541,8 +840,7 @@ fn test_composite_majority() {
     let bar = make_bar(100.0, 10);
     let signal = composite.on_bar(&bar);
 
-    assert!(signal.is_some());
-    let signal = signal.unwrap();
+    let signal = signal.expect("Signal should be generated");
     assert!(signal.strategy_name.starts_with("composite"));
 }
 
@@ -572,7 +870,9 @@ fn test_composite_weighted_uses_strategy_name() {
     let bar = make_bar(100.0, 10);
     let signal = composite.on_bar(&bar);
 
-    assert!(signal.is_some());
+    let signal = signal.expect("Composite signal should be generated after feeding bars");
+    // Signal generated successfully - that's the behavioral check
+    // (SignalAction enum doesn't have default)
 }
 
 // ============================================================================

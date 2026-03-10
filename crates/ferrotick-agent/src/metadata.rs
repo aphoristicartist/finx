@@ -10,9 +10,11 @@
 //!
 //! ## Example
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use ferrotick_agent::metadata::{RequestId, TraceId, AgentMetadata};
+//! use ferrotick_core::ProviderId;
 //!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let request_id = RequestId::new_v4();
 //! let trace_id = TraceId::new();
 //!
@@ -23,6 +25,9 @@
 //!     142,
 //!     false,
 //! )?;
+//! # let _ = metadata;
+//! # Ok(())
+//! # }
 //! ```
 
 use std::fmt::{self, Display, Formatter};
@@ -262,8 +267,12 @@ mod tests {
 
     #[test]
     fn request_id_parses_valid_uuid() {
-        let parsed = RequestId::parse("123e4567-e89b-42d3-a456-426614174000");
-        assert!(parsed.is_ok());
+        let input = "123e4567-e89b-42d3-a456-426614174000";
+        let parsed = RequestId::parse(input).expect("valid UUID should parse");
+        let expected = uuid::Uuid::parse_str(input).expect("test UUID should parse");
+
+        assert_eq!(parsed.as_uuid(), &expected);
+        assert_eq!(parsed.to_hyphenated(), input);
     }
 
     #[test]
@@ -289,8 +298,14 @@ mod tests {
 
     #[test]
     fn trace_id_accepts_valid_format() {
-        let result = TraceId::new_checked("0123456789abcdef0123456789abcdef");
-        assert!(result.is_ok());
+        let input = "0123456789abcdef0123456789abcdef";
+        let trace_id = TraceId::new_checked(input).expect("valid trace ID should parse");
+        let (high, low) = trace_id.as_str().split_at(16);
+
+        assert_eq!(trace_id.as_str(), input);
+        assert_eq!(high, "0123456789abcdef");
+        assert_eq!(low, "0123456789abcdef");
+        assert!(trace_id.as_str().chars().all(|ch| ch.is_ascii_hexdigit()));
     }
 
     #[test]
@@ -333,16 +348,34 @@ mod tests {
 
     #[test]
     fn metadata_converts_to_envelope_meta() {
-        let metadata = AgentMetadata::new(
-            RequestId::new_v4(),
-            TraceId::new(),
-            vec![ProviderId::Yahoo],
-            100,
-            false,
-        )
-        .unwrap();
+        let request_id = RequestId::parse("123e4567-e89b-42d3-a456-426614174000")
+            .expect("test request ID should parse");
+        let trace_id = TraceId::new_checked("0123456789abcdef0123456789abcdef")
+            .expect("test trace ID should parse");
 
-        let envelope_meta = metadata.into_envelope_meta("v1.0.0");
-        assert!(envelope_meta.is_ok());
+        let mut metadata =
+            AgentMetadata::new(request_id, trace_id, vec![ProviderId::Yahoo], 100, false)
+                .expect("metadata should be constructible for valid input");
+        metadata.push_warning("upstream delay");
+        metadata.extend_warnings(vec!["cache stale".to_string()]);
+
+        let expected_request_id = metadata.request_id.to_string();
+        let expected_trace_id = metadata.trace_id.to_string();
+        let expected_source_chain = metadata.source_chain.clone();
+        let expected_latency_ms = metadata.latency_ms;
+        let expected_cache_hit = metadata.cache_hit;
+        let expected_warnings = metadata.warnings.clone();
+
+        let envelope_meta = metadata
+            .into_envelope_meta("v1.0.0")
+            .expect("metadata should convert to envelope meta");
+
+        assert_eq!(envelope_meta.request_id, expected_request_id);
+        assert_eq!(envelope_meta.trace_id, Some(expected_trace_id));
+        assert_eq!(envelope_meta.schema_version, "v1.0.0");
+        assert_eq!(envelope_meta.source_chain, expected_source_chain);
+        assert_eq!(envelope_meta.latency_ms, expected_latency_ms);
+        assert_eq!(envelope_meta.cache_hit, expected_cache_hit);
+        assert_eq!(envelope_meta.warnings, expected_warnings);
     }
 }

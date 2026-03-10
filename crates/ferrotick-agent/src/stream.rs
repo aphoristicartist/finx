@@ -14,15 +14,19 @@
 //!
 //! ## Example
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use ferrotick_agent::stream::{NdjsonStreamWriter, StreamEventType};
+//! use serde_json::json;
 //! use std::io::stdout;
 //!
-//! let mut writer = NdjsonStreamWriter::new(stdout.lock());
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let mut writer = NdjsonStreamWriter::new(stdout().lock());
 //! writer.emit_start(Some(json!({ "request_id": "abc123" })))?;
 //! writer.emit_progress(Some(json!({ "phase": "fetching" })))?;
 //! writer.emit_chunk(Some(json!({ "quotes": [] })))?;
 //! writer.emit_end(Some(json!({ "status": "ok" })))?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Performance

@@ -1,19 +1,20 @@
 use serde::{Deserialize, Serialize};
 
 /// Commission/fee models used by the backtest engine.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(tag = "model", rename_all = "snake_case")]
 pub enum FeeModel {
+    #[default]
     None,
-    Flat { amount: f64 },
-    PerShare { amount: f64 },
-    Bps { bps: f64 },
-}
-
-impl Default for FeeModel {
-    fn default() -> Self {
-        Self::None
-    }
+    Flat {
+        amount: f64,
+    },
+    PerShare {
+        amount: f64,
+    },
+    Bps {
+        bps: f64,
+    },
 }
 
 impl FeeModel {

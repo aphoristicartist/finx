@@ -37,25 +37,22 @@
 //!
 //! ## Quick Start
 //!
-//! ```rust,ignore
-//! use ferrotick_core::{PolygonAdapter, QuoteRequest, DataSource, Symbol};
+//! ```rust,no_run
+//! use std::sync::Arc;
+//! use ferrotick_core::{
+//!     PolygonAdapter, QuoteRequest, Symbol,
+//!     http_client::{HttpAuth, NoopHttpClient},
+//! };
 //!
-//! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     // Create a provider adapter
-//!     let adapter = PolygonAdapter::default();
-//!     
-//!     // Fetch a quote
-//!     let request = QuoteRequest::new(vec![Symbol::new("AAPL")])?;
-//!     let response = adapter.quote(request).await?;
-//!     
-//!     // Access the data
-//!     if let Some(quote) = response.quotes.first() {
-//!         println!("AAPL price: ${:.2}", quote.price);
-//!     }
-//!     
-//!     Ok(())
-//! }
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! // Create a provider adapter
+//! let adapter = PolygonAdapter::with_http_client(Arc::new(NoopHttpClient), HttpAuth::None, None);
+//!
+//! // Build a quote request
+//! let request = QuoteRequest::new(vec![Symbol::parse("AAPL")?])?;
+//! let _ = (adapter, request);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Architecture

@@ -177,8 +177,9 @@ async fn when_circuit_breaker_is_open_requests_are_rejected_immediately() {
     assert_eq!(circuit_breaker.state(), CircuitState::Open);
 
     // And: An adapter using this circuit breaker
-    let http_client = Arc::new(NoopHttpClient::default());
-    let adapter = YahooAdapter::with_circuit_breaker(circuit_breaker, http_client, HttpAuth::None);
+    let http_client = Arc::new(NoopHttpClient);
+    let adapter =
+        YahooAdapter::with_circuit_breaker(circuit_breaker, http_client, HttpAuth::None, None);
 
     // When: A request is made
     let request =

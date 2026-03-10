@@ -54,10 +54,7 @@ impl OutputSanitizer {
         }
 
         for key in required_keys {
-            if !value
-                .as_object()
-                .map_or(false, |obj| obj.contains_key(*key))
-            {
+            if !value.as_object().is_some_and(|obj| obj.contains_key(*key)) {
                 return Err(AIError::Validation(format!(
                     "Missing required key: {}",
                     key

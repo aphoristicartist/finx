@@ -214,6 +214,7 @@ impl SourceRouterBuilder {
                         name: String::from("X-API-Key"),
                         value: key.clone(),
                     },
+                    None,
                 )));
             }
         }
@@ -227,6 +228,7 @@ impl SourceRouterBuilder {
                     http_client,
                     api_key.clone(),
                     secret_key.clone(),
+                    None,
                 )));
             }
         }
@@ -237,6 +239,7 @@ impl SourceRouterBuilder {
                 adapters.push(Arc::new(AlphaVantageAdapter::with_http_client(
                     http_client,
                     key.clone(),
+                    None,
                 )));
             }
         }
@@ -246,6 +249,7 @@ impl SourceRouterBuilder {
             adapters.push(Arc::new(YahooAdapter::with_http_client(
                 http_client,
                 HttpAuth::Cookie(String::new()), // Yahoo works with anonymous access
+                None,
             )));
         }
 
@@ -255,6 +259,7 @@ impl SourceRouterBuilder {
             adapters.push(Arc::new(YahooAdapter::with_http_client(
                 http_client,
                 HttpAuth::Cookie(String::new()),
+                None,
             )));
         }
 
@@ -553,40 +558,106 @@ fn elapsed_ms(started: Instant) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::http_client::NoopHttpClient;
+    use crate::http_client::{HttpClient, HttpError, HttpRequest, HttpResponse, NoopHttpClient};
     use crate::Symbol;
     use std::future::Future;
+    use std::pin::Pin;
     use std::sync::Arc;
     use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
-    /// Create a test router with NoopHttpClient adapters.
-    fn test_router() -> SourceRouter {
-        let http_client = Arc::new(NoopHttpClient::default());
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum QuoteRouteScenario {
+        PolygonPreferred,
+        PolygonRateLimitedFallbackToAlpaca,
+    }
+
+    #[derive(Debug)]
+    struct RoutingTestHttpClient {
+        scenario: QuoteRouteScenario,
+    }
+
+    impl RoutingTestHttpClient {
+        fn new(scenario: QuoteRouteScenario) -> Self {
+            Self { scenario }
+        }
+    }
+
+    impl HttpClient for RoutingTestHttpClient {
+        fn execute<'a>(
+            &'a self,
+            request: HttpRequest,
+        ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, HttpError>> + Send + 'a>> {
+            Box::pin(async move {
+                match self.scenario {
+                    QuoteRouteScenario::PolygonPreferred => {
+                        if request.url.contains("api.polygon.io") {
+                            return Ok(HttpResponse::ok_json(
+                                r#"{"status":"OK","results":[{"T":"AAPL","c":187.42,"v":1000,"t":1700000000}]}"#,
+                            ));
+                        }
+                        panic!(
+                            "unexpected request for PolygonPreferred scenario: {}",
+                            request.url
+                        );
+                    }
+                    QuoteRouteScenario::PolygonRateLimitedFallbackToAlpaca => {
+                        if request
+                            .url
+                            .contains("data.alpaca.markets/v2/stocks/quotes/latest")
+                        {
+                            return Ok(HttpResponse::ok_json(
+                                r#"{"quotes":{"AAPL":{"bp":100.0,"ap":100.2,"t":"1700000000"},"MSFT":{"bp":200.0,"ap":200.2,"t":"1700000001"},"NVDA":{"bp":300.0,"ap":300.2,"t":"1700000002"},"TSLA":{"bp":400.0,"ap":400.2,"t":"1700000003"}}}"#,
+                            ));
+                        }
+                        panic!(
+                            "unexpected request for PolygonRateLimitedFallbackToAlpaca scenario: {}",
+                            request.url
+                        );
+                    }
+                }
+            })
+        }
+    }
+
+    fn test_router_with_http_client(http_client: Arc<dyn HttpClient>) -> SourceRouter {
         SourceRouter::new(vec![
             Arc::new(PolygonAdapter::with_http_client(
                 http_client.clone(),
                 HttpAuth::None,
+                None,
             )),
             Arc::new(AlpacaAdapter::with_http_client(
                 http_client.clone(),
                 "test-key".to_string(),
                 "test-secret".to_string(),
+                None,
             )),
             Arc::new(AlphaVantageAdapter::with_http_client(
                 http_client.clone(),
                 "test-key".to_string(),
+                None,
             )),
             Arc::new(YahooAdapter::with_http_client(
                 http_client.clone(),
                 HttpAuth::None,
+                None,
             )),
         ])
+    }
+
+    /// Create a test router with NoopHttpClient adapters.
+    fn test_router() -> SourceRouter {
+        test_router_with_http_client(Arc::new(NoopHttpClient))
+    }
+
+    fn deterministic_router(scenario: QuoteRouteScenario) -> SourceRouter {
+        test_router_with_http_client(Arc::new(RoutingTestHttpClient::new(scenario)))
     }
 
     #[test]
     #[ignore = "Requires real API data - was testing mock mode"]
     fn auto_prefers_polygon_for_quote_when_available() {
-        let router = test_router();
+        let router = deterministic_router(QuoteRouteScenario::PolygonPreferred);
         let request = QuoteRequest::new(vec![Symbol::parse("AAPL").expect("valid symbol")])
             .expect("valid request");
 
@@ -600,7 +671,7 @@ mod tests {
     #[test]
     #[ignore = "Requires real API data - was testing mock mode"]
     fn auto_falls_back_to_alpaca_after_polygon_rate_limit() {
-        let router = test_router();
+        let router = deterministic_router(QuoteRouteScenario::PolygonRateLimitedFallbackToAlpaca);
         let request = QuoteRequest::new(vec![
             Symbol::parse("AAPL").expect("valid symbol"),
             Symbol::parse("MSFT").expect("valid symbol"),

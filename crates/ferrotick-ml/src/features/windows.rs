@@ -70,7 +70,7 @@ pub fn rolling_max(values: &[f64], window: usize) -> Vec<Option<f64>> {
     output
 }
 
-pub fn lag_features(values: &[f64]) -> (Vec<Option<f64>>, Vec<Option<f64>>, Vec<Option<f64>>) {
+pub fn lag_features(values: &[f64]) -> LagFeatures {
     let mut lag_1 = vec![None; values.len()];
     let mut lag_2 = vec![None; values.len()];
     let mut lag_3 = vec![None; values.len()];
@@ -105,3 +105,4 @@ pub fn rolling_momentum(values: &[f64], window: usize) -> Vec<Option<f64>> {
 
     output
 }
+pub type LagFeatures = (Vec<Option<f64>>, Vec<Option<f64>>, Vec<Option<f64>>);

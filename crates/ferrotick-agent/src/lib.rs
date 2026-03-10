@@ -26,19 +26,26 @@
 //!
 //! ## Quick Start
 //!
-//! ```rust,ignore
-//! use ferrotick_agent::{EnvelopeBuilder, StreamEvent, NdjsonStreamWriter};
+//! ```rust,no_run
+//! use ferrotick_agent::{EnvelopeBuilder, NdjsonStreamWriter};
+//! use ferrotick_core::ProviderId;
+//! use serde_json::json;
+//! use std::io::stdout;
 //!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Create an envelope
 //! let envelope = EnvelopeBuilder::new("v1.0.0")
+//!     .with_source_chain(vec![ProviderId::Yahoo])
 //!     .with_data(json!({ "quotes": [] }))
 //!     .build()?;
 //!
 //! // Stream events
-//! let mut writer = NdjsonStreamWriter::new(stdout.lock());
+//! let mut writer = NdjsonStreamWriter::new(stdout().lock());
 //! writer.emit_start(Some(json!({ "request_id": envelope.meta.request_id })))?;
-//! writer.emit_chunk(Some(envelope))?;
+//! writer.emit_chunk(Some(json!(envelope)))?;
 //! writer.emit_end(None)?;
+//! # Ok(())
+//! # }
 //! ```
 
 pub mod envelope;

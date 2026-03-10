@@ -29,16 +29,20 @@
 //!
 //! All domain types enforce invariants at construction time:
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use ferrotick_core::{Bar, UtcDateTime, ValidationError};
 //!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Valid bar
 //! let ts = UtcDateTime::parse("2024-01-01T00:00:00Z")?;
 //! let bar = Bar::new(ts, 100.0, 105.0, 95.0, 102.0, Some(1000), None)?;
+//! # let _ = bar;
 //!
 //! // Invalid bar (high < low) - returns ValidationError
 //! let invalid = Bar::new(ts, 100.0, 95.0, 105.0, 102.0, Some(1000), None);
 //! assert!(matches!(invalid, Err(ValidationError::InvalidBarRange)));
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Asset Classes

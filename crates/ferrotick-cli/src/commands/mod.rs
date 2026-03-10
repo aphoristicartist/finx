@@ -110,8 +110,7 @@ pub async fn run(cli: &Cli) -> Result<Envelope<Value>, CliError> {
             .await?
         }
         Command::Strategy(args) => {
-            let _ = strategy::run(args).await?;
-            let warnings: Vec<String> = Vec::new();
+            strategy::run(args).await?;
             let source_chain = non_provider_source_chain(&router, &strategy).await;
             return Ok(Envelope::success(
                 Metadata::new(source_chain, 0, true)?.into_envelope_meta("v1.0.0")?,

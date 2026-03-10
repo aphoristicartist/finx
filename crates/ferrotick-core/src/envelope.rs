@@ -34,9 +34,11 @@
 //! The envelope supports partial success: data may be present alongside errors.
 //! Use `--strict` mode to treat any errors or warnings as failures.
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use ferrotick_core::{Envelope, EnvelopeMeta, EnvelopeError, ProviderId};
+//! use serde_json::json;
 //!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Create a successful envelope
 //! let meta = EnvelopeMeta::new(
 //!     "req-12345678",
@@ -46,13 +48,15 @@
 //!     false,
 //! )?;
 //!
-//! let envelope = Envelope::success(meta, my_data);
+//! let mut envelope = Envelope::success(meta, json!({ "quotes": [] }));
 //!
 //! // Add a warning
 //! envelope.meta.push_warning("Rate limit approaching");
 //!
 //! // Add an error (partial success)
 //! envelope.push_error(EnvelopeError::new("source.rate_limited", "Rate limited")?)?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Schema Compliance

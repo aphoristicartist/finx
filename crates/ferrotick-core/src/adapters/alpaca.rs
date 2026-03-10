@@ -4,13 +4,14 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
+use crate::cache::CacheStore;
 use crate::circuit_breaker::{CircuitBreaker, CircuitState};
 use crate::data_source::{
     BarsRequest, CapabilitySet, DataSource, Endpoint, FundamentalsBatch, FundamentalsRequest,
     HealthState, HealthStatus, QuoteBatch, QuoteRequest, SearchBatch, SearchRequest, SourceError,
 };
 use crate::http_client::{HttpClient, HttpRequest};
-use crate::{Bar, BarSeries, Interval, ProviderId, Quote, Symbol, UtcDateTime, ValidationError};
+use crate::{Bar, BarSeries, Interval, ProviderId, Quote, Symbol, UtcDateTime};
 
 /// Alpaca adapter for real API calls.
 #[derive(Clone)]
@@ -22,6 +23,7 @@ pub struct AlpacaAdapter {
     api_key: String,
     secret_key: String,
     circuit_breaker: Arc<CircuitBreaker>,
+    cache: CacheStore,
 }
 
 impl AlpacaAdapter {
@@ -30,6 +32,7 @@ impl AlpacaAdapter {
         http_client: Arc<dyn HttpClient>,
         api_key: impl Into<String>,
         secret_key: impl Into<String>,
+        cache: Option<CacheStore>,
     ) -> Self {
         Self {
             health_state: HealthState::Healthy,
@@ -39,6 +42,7 @@ impl AlpacaAdapter {
             api_key: api_key.into(),
             secret_key: secret_key.into(),
             circuit_breaker: Arc::new(CircuitBreaker::default()),
+            cache: cache.unwrap_or_else(CacheStore::with_default_ttl),
         }
     }
 
@@ -48,10 +52,11 @@ impl AlpacaAdapter {
         http_client: Arc<dyn HttpClient>,
         api_key: impl Into<String>,
         secret_key: impl Into<String>,
+        cache: Option<CacheStore>,
     ) -> Self {
         Self {
             circuit_breaker,
-            ..Self::with_http_client(http_client, api_key, secret_key)
+            ..Self::with_http_client(http_client, api_key, secret_key, cache)
         }
     }
 
@@ -67,13 +72,27 @@ impl AlpacaAdapter {
             Arc::new(crate::http_client::ReqwestHttpClient::new()),
             api_key,
             secret_key,
+            None,
         )
+    }
+
+    fn bars_cache_key(symbol: &Symbol, interval: Interval, limit: usize) -> String {
+        format!("bars:{}:{}:{}", symbol.as_str(), interval.as_str(), limit)
+    }
+
+    fn quote_cache_key(symbol: &Symbol) -> String {
+        format!("quote:{}", symbol.as_str())
     }
 }
 
 // Real API implementation methods
 impl AlpacaAdapter {
     async fn fetch_real_quotes(&self, req: &QuoteRequest) -> Result<QuoteBatch, SourceError> {
+        let cache_key = Self::quote_cache_key(&req.symbols[0]);
+        if let Some(cached_body) = self.cache.get(&cache_key).await {
+            return self.parse_quote_response(&cached_body);
+        }
+
         if !self.circuit_breaker.allow_request() {
             return Err(SourceError::unavailable("alpaca circuit breaker is open"));
         }
@@ -110,40 +129,17 @@ impl AlpacaAdapter {
         }
 
         self.circuit_breaker.record_success();
-
-        // Parse Alpaca response
-        let alpaca_response: AlpacaQuotesResponse =
-            serde_json::from_str(&response.body).map_err(|e| {
-                SourceError::internal(format!("failed to parse alpaca response: {}", e))
-            })?;
-
-        let quotes = alpaca_response
-            .quotes
-            .into_iter()
-            .filter_map(|(symbol_str, quote)| {
-                let symbol = Symbol::parse(&symbol_str).ok()?;
-                let ts_offset =
-                    time::OffsetDateTime::from_unix_timestamp(quote.timestamp.parse().ok()?)
-                        .ok()?;
-                let ts = UtcDateTime::from_offset_datetime(ts_offset).ok()?;
-
-                Quote::new(
-                    symbol,
-                    quote.last_quote_price(),
-                    Some(quote.bid_price),
-                    Some(quote.ask_price),
-                    None,
-                    "USD",
-                    ts,
-                )
-                .ok()
-            })
-            .collect();
-
-        Ok(QuoteBatch { quotes })
+        let quote_batch = self.parse_quote_response(&response.body)?;
+        self.cache.put(cache_key, response.body, None).await;
+        Ok(quote_batch)
     }
 
     async fn fetch_real_bars(&self, req: &BarsRequest) -> Result<BarSeries, SourceError> {
+        let cache_key = Self::bars_cache_key(&req.symbol, req.interval, req.limit);
+        if let Some(cached_body) = self.cache.get(&cache_key).await {
+            return self.parse_bars_response(req, &cached_body);
+        }
+
         if !self.circuit_breaker.allow_request() {
             return Err(SourceError::unavailable("alpaca circuit breaker is open"));
         }
@@ -193,8 +189,44 @@ impl AlpacaAdapter {
         }
 
         self.circuit_breaker.record_success();
+        let series = self.parse_bars_response(req, &response.body)?;
+        self.cache.put(cache_key, response.body, None).await;
+        Ok(series)
+    }
 
-        let bars_response: AlpacaBarsResponse = serde_json::from_str(&response.body)
+    fn parse_quote_response(&self, body: &str) -> Result<QuoteBatch, SourceError> {
+        let alpaca_response: AlpacaQuotesResponse = serde_json::from_str(body).map_err(|e| {
+            SourceError::internal(format!("failed to parse alpaca response: {}", e))
+        })?;
+
+        let quotes = alpaca_response
+            .quotes
+            .into_iter()
+            .filter_map(|(symbol_str, quote)| {
+                let symbol = Symbol::parse(&symbol_str).ok()?;
+                let ts_offset =
+                    time::OffsetDateTime::from_unix_timestamp(quote.timestamp.parse().ok()?)
+                        .ok()?;
+                let ts = UtcDateTime::from_offset_datetime(ts_offset).ok()?;
+
+                Quote::new(
+                    symbol,
+                    quote.last_quote_price(),
+                    Some(quote.bid_price),
+                    Some(quote.ask_price),
+                    quote.volume.map(|v| v as u64).or(Some(0)),
+                    "USD",
+                    ts,
+                )
+                .ok()
+            })
+            .collect();
+
+        Ok(QuoteBatch { quotes })
+    }
+
+    fn parse_bars_response(&self, req: &BarsRequest, body: &str) -> Result<BarSeries, SourceError> {
+        let bars_response: AlpacaBarsResponse = serde_json::from_str(body)
             .map_err(|e| SourceError::internal(format!("failed to parse alpaca bars: {}", e)))?;
 
         let mut bars = Vec::new();
@@ -353,6 +385,8 @@ struct AlpacaQuoteData {
     ask_price: f64,
     #[serde(rename = "t")]
     timestamp: String,
+    #[serde(rename = "v", default)]
+    volume: Option<i64>,
 }
 
 impl AlpacaQuoteData {
@@ -377,10 +411,6 @@ struct AlpacaBarData {
     v: i64,    // volume
     #[serde(default)]
     vw: Option<f64>, // vwap
-}
-
-fn validation_to_error(error: ValidationError) -> SourceError {
-    SourceError::internal(error.to_string())
 }
 
 #[cfg(test)]
@@ -427,7 +457,7 @@ mod tests {
     #[test]
     fn circuit_breaker_marks_health_unhealthy_after_failures() {
         let client = Arc::new(RecordingHttpClient::failure());
-        let adapter = AlpacaAdapter::with_http_client(client, "demo-key", "demo-secret");
+        let adapter = AlpacaAdapter::with_http_client(client, "demo-key", "demo-secret", None);
         let request = QuoteRequest::new(vec![Symbol::parse("AAPL").expect("valid symbol")])
             .expect("valid request");
 
