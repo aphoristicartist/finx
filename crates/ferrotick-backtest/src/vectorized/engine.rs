@@ -6,6 +6,8 @@ use std::collections::HashMap;
 /// Vectorized backtesting engine using DuckDB for columnar operations
 pub struct VectorizedBacktest {
     db: Connection,
+    commission_per_share: f64,
+    slippage_rate: f64,
 }
 
 /// Result of a single parameter combination backtest
@@ -20,7 +22,11 @@ impl VectorizedBacktest {
     pub fn new() -> Result<Self, BacktestError> {
         let db = Connection::open_in_memory()
             .map_err(|e| BacktestError::EngineError(format!("Failed to create DuckDB: {}", e)))?;
-        Ok(Self { db })
+        Ok(Self {
+            db,
+            commission_per_share: 0.01,
+            slippage_rate: 0.0001,
+        })
     }
 
     /// Load price data into DuckDB for columnar operations
@@ -188,36 +194,44 @@ impl VectorizedBacktest {
         let prices = prices
             .map_err(|e| BacktestError::EngineError(format!("Failed to read prices: {}", e)))?;
 
-        if prices.is_empty() {
+        if prices.is_empty() || signals.is_empty() {
             return Ok(Array1::from_vec(vec![100_000.0]));
         }
 
-        let mut equity = vec![100_000.0]; // Starting capital
-        let mut position = 0.0;
-        let mut i = 1;
+        let series_len = prices.len().min(signals.len());
+        if series_len == 0 {
+            return Ok(Array1::from_vec(vec![100_000.0]));
+        }
 
-        for &signal in signals.iter().skip(1) {
-            if i >= prices.len() {
-                break;
-            }
+        let mut cash = 100_000.0;
+        let mut position = 0.0;
+        let mut equity = Vec::with_capacity(signals.len());
+        equity.push(cash); // Starting capital
+
+        // Execute signal[i - 1] on bar i to avoid same-bar look-ahead bias.
+        for i in 1..series_len {
+            let signal = signals[i - 1];
+            let price = prices[i];
 
             if signal == 1 && position == 0.0 {
                 // Buy
-                position = equity[i - 1] / prices[i];
-                equity.push(position * prices[i]);
+                let effective_price = price * (1.0 + self.slippage_rate);
+                let per_share_cost = effective_price + self.commission_per_share;
+                if per_share_cost > 0.0 {
+                    position = cash / per_share_cost;
+                    let commission_cost = position * self.commission_per_share;
+                    cash -= (position * effective_price) + commission_cost;
+                }
             } else if signal == -1 && position > 0.0 {
                 // Sell
-                equity.push(position * prices[i]);
+                let effective_price = price * (1.0 - self.slippage_rate);
+                let commission_cost = position * self.commission_per_share;
+                let proceeds = (position * effective_price) - commission_cost;
+                cash += proceeds;
                 position = 0.0;
-            } else {
-                // Hold
-                if position > 0.0 {
-                    equity.push(position * prices[i]);
-                } else {
-                    equity.push(equity[i - 1]);
-                }
             }
-            i += 1;
+
+            equity.push(cash + (position * price));
         }
 
         // Fill remaining equity values if needed
@@ -268,27 +282,6 @@ impl VectorizedBacktest {
             .collect();
 
         Ok(PerformanceMetrics::from_equity_curve(&equity_points, 252.0))
-    }
-
-    fn calculate_max_drawdown(&self, equity_curve: &Array1<f64>) -> f64 {
-        if equity_curve.is_empty() {
-            return 0.0;
-        }
-
-        let mut max_drawdown = 0.0;
-        let mut peak = equity_curve[0];
-
-        for &equity in equity_curve.iter() {
-            if equity > peak {
-                peak = equity;
-            }
-            let drawdown = (peak - equity) / peak;
-            if drawdown > max_drawdown {
-                max_drawdown = drawdown;
-            }
-        }
-
-        max_drawdown
     }
 
     fn generate_param_combinations(

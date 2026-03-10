@@ -11,12 +11,7 @@ pub struct FuturesContract {
 }
 
 impl FuturesContract {
-    pub fn new(
-        symbol: String,
-        underlying: String,
-        expiry: String,
-        contract_size: f64,
-    ) -> Self {
+    pub fn new(symbol: String, underlying: String, expiry: String, contract_size: f64) -> Self {
         Self {
             symbol,
             underlying,

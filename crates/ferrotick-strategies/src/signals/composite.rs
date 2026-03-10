@@ -74,6 +74,7 @@ impl CompositeSignalGenerator {
             strength,
             reason: format!("majority buy={buy}, sell={sell}, total={}", signals.len()),
             strategy_name: "composite_majority".to_string(),
+            source_strategy_id: "composite_majority".to_string(),
         }
     }
 
@@ -92,6 +93,7 @@ impl CompositeSignalGenerator {
             strength: if all_same { 1.0 } else { 0.0 },
             reason: format!("unanimous all_same={all_same}"),
             strategy_name: "composite_unanimous".to_string(),
+            source_strategy_id: "composite_unanimous".to_string(),
         }
     }
 
@@ -132,6 +134,7 @@ impl CompositeSignalGenerator {
             strength: normalized.abs().clamp(0.0, 1.0),
             reason: format!("weighted_score={normalized:.4}"),
             strategy_name: "composite_weighted".to_string(),
+            source_strategy_id: "composite_weighted".to_string(),
         }
     }
 }

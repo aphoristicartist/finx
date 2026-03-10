@@ -97,6 +97,12 @@ impl Dataset {
 
 pub struct DatasetBuilder;
 
+impl Default for DatasetBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DatasetBuilder {
     pub const fn new() -> Self {
         Self
@@ -144,12 +150,14 @@ impl DatasetBuilder {
                 TargetColumn::Return20d => row.return_20d,
             };
 
-            if feature_values.iter().all(Option::is_some) && target_value.is_some() {
-                for value in feature_values.iter().flatten() {
-                    matrix.push(*value);
+            if let Some(target_value) = target_value {
+                if feature_values.iter().all(Option::is_some) {
+                    for value in feature_values.iter().flatten() {
+                        matrix.push(*value);
+                    }
+                    targets.push(target_value);
+                    timestamps.push(row.timestamp.clone());
                 }
-                targets.push(target_value.expect("checked is_some"));
-                timestamps.push(row.timestamp.clone());
             }
         }
 

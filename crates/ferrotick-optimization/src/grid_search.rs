@@ -120,12 +120,11 @@ impl GridSearchOptimizer {
             // Convert bars to BarEvents (single symbol assumption for optimization)
             let bar_events: Vec<BarEvent> = bars
                 .iter()
-                .enumerate()
-                .map(|(_i, bar)| {
+                .map(|bar| {
                     BarEvent::new(
                         default_symbol.clone(),
                         ferrotick_core::Bar {
-                            ts: bar.ts.clone(),
+                            ts: bar.ts,
                             open: bar.open,
                             high: bar.high,
                             low: bar.low,

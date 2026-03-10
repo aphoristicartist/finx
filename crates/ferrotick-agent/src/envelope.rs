@@ -11,10 +11,12 @@
 //!
 //! ## Example
 //!
-//! ```rust,ignore
-//! use ferrotick_agent::envelope::EnvelopeBuilder;
+//! ```rust,no_run
+//! use ferrotick_agent::{EnvelopeBuilder, EnvelopeValidator};
+//! use ferrotick_core::ProviderId;
 //! use serde_json::json;
 //!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let envelope = EnvelopeBuilder::new("v1.0.0")
 //!     .with_source_chain(vec![ProviderId::Yahoo])
 //!     .with_data(json!({ "quotes": [] }))
@@ -24,6 +26,8 @@
 //!
 //! // Validate against schema
 //! EnvelopeValidator::validate(&envelope)?;
+//! # Ok(())
+//! # }
 //! ```
 
 use ferrotick_core::{Envelope, EnvelopeError, EnvelopeMeta, ProviderId, ValidationError};
@@ -489,8 +493,25 @@ mod tests {
     #[test]
     fn validator_accepts_valid_envelope() {
         let envelope = make_valid_envelope();
-        let result = EnvelopeValidator::validate(&envelope);
-        assert!(result.is_ok());
+
+        EnvelopeValidator::validate(&envelope).expect("valid envelope should pass validation");
+
+        let serialized = serde_json::to_value(&envelope).expect("envelope should serialize");
+        let meta = serialized
+            .get("meta")
+            .and_then(Value::as_object)
+            .expect("envelope should contain a meta object");
+        let request_id = meta
+            .get("request_id")
+            .and_then(Value::as_str)
+            .expect("meta.request_id should be present");
+
+        assert!(request_id.len() >= 8);
+        assert_eq!(meta.get("schema_version"), Some(&json!("v1.0.0")));
+        assert_eq!(meta.get("source_chain"), Some(&json!(["yahoo"])));
+        assert_eq!(meta.get("latency_ms"), Some(&json!(142)));
+        assert_eq!(meta.get("cache_hit"), Some(&json!(false)));
+        assert_eq!(serialized.get("data"), Some(&json!({ "quotes": [] })));
     }
 
     #[test]

@@ -116,7 +116,13 @@ pub struct BacktestEngine {
     order_executor: OrderExecutor,
     event_bus: EventBus,
     latest_bars: HashMap<Symbol, Bar>,
-    pending_orders: Vec<Order>,
+    pending_orders: Vec<PendingOrder>,
+}
+
+#[derive(Debug, Clone)]
+struct PendingOrder {
+    order: Order,
+    queued_at: UtcDateTime,
 }
 
 impl BacktestEngine {
@@ -158,22 +164,8 @@ impl BacktestEngine {
         let mut equity_curve = Vec::with_capacity(data.len());
 
         for bar_event in data {
-            // First, execute any pending orders from previous bars using this bar's open price
-            if !self.pending_orders.is_empty() {
-                let orders_to_execute = std::mem::take(&mut self.pending_orders);
-                for order in orders_to_execute {
-                    let bar = self.latest_bars.get(&order.symbol).ok_or_else(|| {
-                        BacktestError::MissingBarForSymbol(order.symbol.to_string())
-                    })?;
-
-                    if let Some(fill) =
-                        self.order_executor
-                            .execute(&order, bar, &self.config.costs)?
-                    {
-                        self.event_bus.publish(BacktestEvent::Fill(fill))?;
-                    }
-                }
-            }
+            // Execute queued orders at the start of the next bar for that symbol.
+            self.execute_pending_orders_for_bar(bar_event)?;
 
             self.event_bus
                 .publish(BacktestEvent::Bar(bar_event.clone()))?;
@@ -187,25 +179,73 @@ impl BacktestEngine {
             });
         }
 
-        // Execute any remaining pending orders at the end
-        if !self.pending_orders.is_empty() {
-            let orders_to_execute = std::mem::take(&mut self.pending_orders);
-            for order in orders_to_execute {
-                let bar = self
-                    .latest_bars
-                    .get(&order.symbol)
-                    .ok_or_else(|| BacktestError::MissingBarForSymbol(order.symbol.to_string()))?;
-
-                if let Some(fill) = self
-                    .order_executor
-                    .execute(&order, bar, &self.config.costs)?
-                {
-                    self.event_bus.publish(BacktestEvent::Fill(fill))?;
-                }
-            }
+        self.apply_pending_fills()?;
+        if let Some(last_point) = equity_curve.last_mut() {
+            last_point.equity = self.portfolio.equity();
+            last_point.cash = self.portfolio.cash();
+            last_point.position_value = self.portfolio.position_value();
         }
 
         self.generate_report(equity_curve)
+    }
+
+    fn execute_pending_orders_for_bar(&mut self, bar_event: &BarEvent) -> BacktestResult<()> {
+        if self.pending_orders.is_empty() {
+            return Ok(());
+        }
+
+        let mut still_pending = Vec::with_capacity(self.pending_orders.len());
+        let orders_to_process = std::mem::take(&mut self.pending_orders);
+
+        for pending in orders_to_process {
+            if pending.order.symbol != bar_event.symbol || pending.queued_at >= bar_event.bar.ts {
+                still_pending.push(pending);
+                continue;
+            }
+
+            if let Some(fill) =
+                self.order_executor
+                    .execute(&pending.order, &bar_event.bar, &self.config.costs)?
+            {
+                self.event_bus.publish(BacktestEvent::Fill(fill))?;
+            }
+        }
+
+        self.pending_orders = still_pending;
+        Ok(())
+    }
+
+    fn apply_pending_fills(&mut self) -> BacktestResult<()> {
+        if self.pending_orders.is_empty() {
+            return Ok(());
+        }
+
+        let mut still_pending = Vec::with_capacity(self.pending_orders.len());
+        let orders_to_process = std::mem::take(&mut self.pending_orders);
+
+        for pending in orders_to_process {
+            let Some(latest_bar) = self.latest_bars.get(&pending.order.symbol).cloned() else {
+                still_pending.push(pending);
+                continue;
+            };
+
+            // Keep strict next-bar semantics at end-of-run as well: orders created on the latest
+            // bar must remain unfilled instead of executing on the same bar.
+            if pending.queued_at >= latest_bar.ts {
+                still_pending.push(pending);
+                continue;
+            }
+
+            if let Some(fill) =
+                self.order_executor
+                    .execute(&pending.order, &latest_bar, &self.config.costs)?
+            {
+                self.portfolio.apply_fill(&fill)?;
+            }
+        }
+
+        self.pending_orders = still_pending;
+        Ok(())
     }
 
     fn process_event_queue<S: Strategy>(&mut self, strategy: &mut S) -> BacktestResult<()> {
@@ -225,22 +265,17 @@ impl BacktestEngine {
                     if let Some(order) =
                         strategy.create_order(&signal, &self.portfolio, &self.config)
                     {
-                        // Queue the order for execution on the NEXT bar (prevents look-ahead bias - Issue 1)
-                        self.pending_orders.push(order);
+                        self.pending_orders.push(PendingOrder {
+                            order,
+                            queued_at: signal.ts,
+                        });
                     }
                 }
                 BacktestEvent::Order(order) => {
-                    // Orders should now only come from pending_orders execution
-                    let bar = self.latest_bars.get(&order.symbol).ok_or_else(|| {
-                        BacktestError::MissingBarForSymbol(order.symbol.to_string())
-                    })?;
-
-                    if let Some(fill) =
-                        self.order_executor
-                            .execute(&order, bar, &self.config.costs)?
-                    {
-                        self.event_bus.publish(BacktestEvent::Fill(fill))?;
-                    }
+                    self.pending_orders.push(PendingOrder {
+                        queued_at: order.created_at,
+                        order,
+                    });
                 }
                 BacktestEvent::Fill(fill) => {
                     self.portfolio.apply_fill(&fill)?;

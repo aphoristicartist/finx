@@ -3,7 +3,7 @@ use std::path::Path;
 
 use duckdb::params;
 use ferrotick_core::{Bar, Symbol, UtcDateTime};
-use ferrotick_warehouse::{AccessMode, QueryGuardrails, Warehouse};
+use ferrotick_warehouse::Warehouse;
 use polars::prelude::*;
 
 use crate::features::FeatureRow;
@@ -11,8 +11,8 @@ use crate::{MlError, MlResult};
 
 const CREATE_FEATURES_TABLE_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS features (
-    symbol VARCHAR,
-    timestamp TIMESTAMP,
+    symbol VARCHAR NOT NULL,
+    timestamp TIMESTAMP NOT NULL,
     rsi DOUBLE,
     macd DOUBLE,
     macd_signal DOUBLE,
@@ -28,8 +28,8 @@ CREATE TABLE IF NOT EXISTS features (
     lag_2 DOUBLE,
     lag_3 DOUBLE,
     rolling_momentum DOUBLE,
-    PRIMARY KEY (symbol, timestamp)
-);
+    CONSTRAINT features_pkey PRIMARY KEY (symbol, timestamp)
+)
 "#;
 
 const INSERT_FEATURE_SQL: &str = r#"
@@ -55,16 +55,12 @@ impl FeatureStore {
         Self { warehouse }
     }
 
-    pub fn ensure_table(&self) -> MlResult<()> {
-        self.warehouse.execute_query(
-            CREATE_FEATURES_TABLE_SQL,
-            QueryGuardrails {
-                max_rows: 1,
-                query_timeout_ms: 30_000,
-            },
-            true,
-        )?;
-        Ok(())
+    /// Get a direct connection to the database, bypassing the connection pool.
+    /// This is necessary because the connection pool may cache schema information
+    /// and not see DDL changes made by other connections.
+    fn direct_connection(&self) -> Result<duckdb::Connection, MlError> {
+        let db_path = self.warehouse.db_path();
+        duckdb::Connection::open(db_path).map_err(|e| MlError::Store(e.to_string()))
     }
 
     pub fn load_daily_bars(
@@ -81,10 +77,8 @@ impl FeatureStore {
             ORDER BY ts ASC
         "#;
 
-        let connection = self
-            .warehouse
-            .acquire_connection(AccessMode::ReadOnly)
-            .map_err(|e| MlError::Store(e.to_string()))?;
+        // Use direct connection to avoid pool caching issues
+        let connection = self.direct_connection()?;
 
         let mut stmt = connection
             .prepare(sql)
@@ -133,14 +127,15 @@ impl FeatureStore {
             return Ok(0);
         }
 
-        self.ensure_table()?;
+        // Use direct connection to avoid pool caching issues with DDL/DML
+        let connection = self.direct_connection()?;
 
-        // SECURITY: Use parameterized queries and batch transaction for performance
-        let connection = self
-            .warehouse
-            .acquire_connection(AccessMode::ReadWrite)
+        // Create table if it doesn't exist
+        connection
+            .execute_batch(CREATE_FEATURES_TABLE_SQL)
             .map_err(|e| MlError::Store(e.to_string()))?;
 
+        // SECURITY: Use parameterized queries and batch transaction for performance
         connection
             .execute_batch("BEGIN TRANSACTION")
             .map_err(|e| MlError::Store(e.to_string()))?;
@@ -208,10 +203,8 @@ impl FeatureStore {
             ORDER BY timestamp ASC
         "#;
 
-        let connection = self
-            .warehouse
-            .acquire_connection(AccessMode::ReadOnly)
-            .map_err(|e| MlError::Store(e.to_string()))?;
+        // Use direct connection to avoid pool caching issues
+        let connection = self.direct_connection()?;
 
         let mut stmt = connection
             .prepare(sql)

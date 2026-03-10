@@ -1579,6 +1579,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrotick-tests"
+version = "0.1.0"
+dependencies = [
+ "ferrotick-backtest",
+ "ferrotick-core",
+ "ferrotick-ml",
+ "ferrotick-optimization",
+ "ferrotick-strategies",
+ "ndarray",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "ferrotick-trading"
 version = "0.1.0"
 dependencies = [

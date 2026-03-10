@@ -12,27 +12,24 @@
 //!
 //! ## Quick Start
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use ferrotick_optimization::{GridSearchOptimizer, WalkForwardValidator};
-//! use ferrotick_backtest::BacktestConfig;
 //!
+//! # fn main() {
 //! // Create a grid search optimizer
 //! let mut optimizer = GridSearchOptimizer::new();
 //! optimizer
 //!     .add_param("short_period", vec![5.0, 10.0, 20.0])
 //!     .add_param("long_period", vec![20.0, 50.0, 100.0]);
 //!
-//! // Run optimization
-//! let report = optimizer.optimize(strategy_factory, &bars, config).await;
-//! println!("Best Sharpe: {}", report.best_metrics.sharpe_ratio);
+//! // Inspect parameter space size
+//! let combinations = optimizer.total_combinations();
+//! assert_eq!(combinations, 9);
 //!
-//! // Validate with walk-forward
+//! // Configure walk-forward validation
 //! let validator = WalkForwardValidator::new(0.7, 0.2);
-//! let summary = validator.validate(strategy_factory, &bars, &optimizer, config).await;
-//!
-//! if summary.overfitting_ratio > 1.5 {
-//!     println!("Warning: Strategy may be overfitting!");
-//! }
+//! let _ = validator;
+//! # }
 //! ```
 
 pub mod error;

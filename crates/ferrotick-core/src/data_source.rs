@@ -15,19 +15,14 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
-//! use ferrotick_core::{DataSource, QuoteRequest, QuoteBatch, SourceError, PolygonAdapter, Symbol};
+//! ```rust,no_run
+//! use ferrotick_core::{QuoteRequest, Symbol};
 //!
-//! async fn fetch_quote(adapter: &PolygonAdapter) -> Result<(), SourceError> {
-//!     let request = QuoteRequest::new(vec![Symbol::new("AAPL")])?;
-//!     let response = adapter.quote(request).await?;
-//!     
-//!     for quote in &response.quotes {
-//!         println!("{}: ${:.2}", quote.symbol, quote.price);
-//!     }
-//!     
-//!     Ok(())
-//! }
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let request = QuoteRequest::new(vec![Symbol::parse("AAPL")?])?;
+//! assert_eq!(request.symbols.len(), 1);
+//! # Ok(())
+//! # }
 //! ```
 
 use std::fmt::{Display, Formatter};
@@ -453,7 +448,7 @@ pub struct EarningsBatch {
 ///
 /// # Example Implementation
 ///
-/// ```rust,ignore
+/// ```text
 /// use ferrotick_core::{DataSource, ProviderId, CapabilitySet, QuoteRequest, QuoteBatch};
 ///
 /// struct MyAdapter {
@@ -466,10 +461,10 @@ pub struct EarningsBatch {
 ///     }
 ///     
 ///     fn capabilities(&self) -> CapabilitySet {
-///         CapabilitySet::new(true, true, false, true)
+///         CapabilitySet::new(true, true, false, true, false, false)
 ///     }
-///     
-///     // ... implement other methods
+///
+///     // ... implement quote/bars/fundamentals/search/financials/earnings/health
 /// }
 /// ```
 ///

@@ -15,26 +15,24 @@ use ferrotick_core::{
 };
 
 fn mock_polygon() -> PolygonAdapter {
-    PolygonAdapter::with_http_client(Arc::new(NoopHttpClient::default()), HttpAuth::None)
+    PolygonAdapter::with_http_client(Arc::new(NoopHttpClient), HttpAuth::None, None)
 }
 
 fn mock_alpaca() -> AlpacaAdapter {
     AlpacaAdapter::with_http_client(
-        Arc::new(NoopHttpClient::default()),
+        Arc::new(NoopHttpClient),
         "test-key".to_string(),
         "test-secret".to_string(),
+        None,
     )
 }
 
 fn mock_alphavantage() -> AlphaVantageAdapter {
-    AlphaVantageAdapter::with_http_client(
-        Arc::new(NoopHttpClient::default()),
-        "test-key".to_string(),
-    )
+    AlphaVantageAdapter::with_http_client(Arc::new(NoopHttpClient), "test-key".to_string(), None)
 }
 
 fn mock_yahoo() -> YahooAdapter {
-    YahooAdapter::with_http_client(Arc::new(NoopHttpClient::default()), HttpAuth::None)
+    YahooAdapter::with_http_client(Arc::new(NoopHttpClient), HttpAuth::None, None)
 }
 
 #[derive(Clone)]

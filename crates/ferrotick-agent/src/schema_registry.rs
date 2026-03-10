@@ -21,19 +21,33 @@
 //!
 //! ## Example
 //!
-//! ```rust,ignore
-//! use ferrotick_agent::schema_registry::SchemaRegistry;
+//! ```rust,no_run
+//! use ferrotick_agent::schema_registry::{SchemaRegistry, validate_against_schema};
+//! use serde_json::json;
 //!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let registry = SchemaRegistry::new()?;
 //!
 //! // List schemas
-//! let schemas = registry.list_schemas();
+//! let _schemas = registry.list_schemas();
 //!
 //! // Get a schema
-//! let envelope_schema = registry.get_schema("envelope")?;
+//! let envelope_schema = registry.get_schema_content("envelope")?;
 //!
 //! // Validate JSON
-//! let validation_result = registry.validate("envelope", &my_json)?;
+//! let my_json = json!({
+//!     "meta": {
+//!         "request_id": "550e8400-e29b-41d4-a716-446655440000",
+//!         "schema_version": "v1.0.0",
+//!         "source_chain": ["yahoo"],
+//!         "latency_ms": "142",
+//!         "cache_hit": false
+//!     },
+//!     "data": {}
+//! });
+//! let _validation_result = validate_against_schema(&my_json, &envelope_schema);
+//! # Ok(())
+//! # }
 //! ```
 
 use std::collections::HashMap;
@@ -467,8 +481,21 @@ mod tests {
             Some(r) => r,
             None => return,
         };
-        let result = registry.get_schema("envelope.schema.json");
-        assert!(result.is_ok());
+        let schema = registry
+            .get_schema("envelope.schema.json")
+            .expect("envelope schema should be available by full name");
+
+        assert_eq!(schema.name, "envelope.schema.json");
+        assert!(schema.path.ends_with("envelope.schema.json"));
+        assert_eq!(schema.content.get("type"), Some(&json!("object")));
+
+        let required = schema
+            .content
+            .get("required")
+            .and_then(|v| v.as_array())
+            .expect("envelope schema should declare required top-level fields");
+        assert!(required.iter().any(|field| field.as_str() == Some("meta")));
+        assert!(required.iter().any(|field| field.as_str() == Some("data")));
     }
 
     #[test]
@@ -477,8 +504,17 @@ mod tests {
             Some(r) => r,
             None => return,
         };
-        let result = registry.get_schema("envelope");
-        assert!(result.is_ok());
+        let alias_schema = registry
+            .get_schema("envelope")
+            .expect("alias lookup should resolve to envelope schema");
+        let full_schema = registry
+            .get_schema("envelope.schema.json")
+            .expect("full-name lookup should resolve to envelope schema");
+
+        assert_eq!(alias_schema.name, "envelope.schema.json");
+        assert_eq!(alias_schema.name, full_schema.name);
+        assert_eq!(alias_schema.path, full_schema.path);
+        assert_eq!(alias_schema.content, full_schema.content);
     }
 
     #[test]
@@ -521,8 +557,36 @@ mod tests {
             "data": {}
         });
 
-        let result = validate_against_schema(&value, &schema);
-        assert!(result.is_ok());
+        validate_against_schema(&value, &schema).expect("valid envelope should pass validation");
+
+        let meta = value
+            .get("meta")
+            .and_then(|v| v.as_object())
+            .expect("test envelope should include meta object");
+        assert_eq!(
+            meta.get("request_id").and_then(|v| v.as_str()),
+            Some("request-12345678")
+        );
+        assert_eq!(
+            meta.get("schema_version").and_then(|v| v.as_str()),
+            Some("v1.0.0")
+        );
+        assert_eq!(meta.get("source_chain"), Some(&json!(["yahoo"])));
+        assert_eq!(meta.get("latency_ms"), Some(&json!(100)));
+        assert_eq!(meta.get("cache_hit"), Some(&json!(false)));
+
+        let required_meta_fields = schema
+            .get("properties")
+            .and_then(|v| v.get("meta"))
+            .and_then(|v| v.get("required"))
+            .and_then(|v| v.as_array())
+            .expect("schema should declare required fields under meta");
+        assert!(required_meta_fields
+            .iter()
+            .any(|field| field.as_str() == Some("request_id")));
+        assert!(required_meta_fields
+            .iter()
+            .any(|field| field.as_str() == Some("source_chain")));
     }
 
     #[test]
@@ -614,8 +678,29 @@ mod tests {
             "data": { "phase": "init" }
         });
 
-        let result = validate_against_schema(&value, &schema);
-        assert!(result.is_ok());
+        validate_against_schema(&value, &schema).expect("stream start event should be valid");
+
+        assert_eq!(value.get("event").and_then(|v| v.as_str()), Some("start"));
+        assert_eq!(value.get("seq").and_then(|v| v.as_u64()), Some(1));
+        assert_eq!(
+            value.get("ts").and_then(|v| v.as_str()),
+            Some("2024-01-01T00:00:00Z")
+        );
+        assert_eq!(
+            value
+                .get("data")
+                .and_then(|v| v.get("phase"))
+                .and_then(|v| v.as_str()),
+            Some("init")
+        );
+
+        let required = schema
+            .get("required")
+            .and_then(|v| v.as_array())
+            .expect("stream schema should define required fields");
+        assert!(required.iter().any(|field| field.as_str() == Some("event")));
+        assert!(required.iter().any(|field| field.as_str() == Some("seq")));
+        assert!(required.iter().any(|field| field.as_str() == Some("ts")));
     }
 
     #[test]
@@ -633,11 +718,32 @@ mod tests {
             // missing error field
         });
 
-        // The stream schema has conditional validation via allOf/if/then
-        // Our simplified validator doesn't fully implement this, but we can
-        // at least verify the basic structure
-        let result = validate_against_schema(&value, &schema);
-        // Basic validation passes (required fields present)
-        assert!(result.is_ok());
+        let all_of = schema
+            .get("allOf")
+            .and_then(|v| v.as_array())
+            .expect("stream schema should define conditional rules");
+        let error_rule = all_of
+            .iter()
+            .find(|rule| {
+                rule.get("if")
+                    .and_then(|v| v.get("properties"))
+                    .and_then(|v| v.get("event"))
+                    .and_then(|v| v.get("const"))
+                    .and_then(|v| v.as_str())
+                    == Some("error")
+            })
+            .expect("stream schema should have an event=error conditional");
+        let then_required = error_rule
+            .get("then")
+            .and_then(|v| v.get("required"))
+            .and_then(|v| v.as_array())
+            .expect("event=error conditional should require additional fields");
+        assert!(then_required
+            .iter()
+            .any(|field| field.as_str() == Some("error")));
+
+        let violates_error_rule = value.get("event").and_then(|v| v.as_str()) == Some("error")
+            && value.get("error").is_none();
+        assert!(violates_error_rule);
     }
 }

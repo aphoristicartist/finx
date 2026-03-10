@@ -64,6 +64,7 @@ impl BollingerBandSqueezeStrategy {
             strength: strength.clamp(0.0, 1.0),
             reason: reason.into(),
             strategy_name: self.name().to_string(),
+            source_strategy_id: self.name().to_string(),
         }
     }
 }

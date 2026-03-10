@@ -25,7 +25,7 @@ async fn run_features(
         )));
     }
 
-    if args.output.trim().to_ascii_lowercase() != "json" {
+    if !args.output.trim().eq_ignore_ascii_case("json") {
         return Err(CliError::Command(String::from(
             "ml features supports only --output json in Phase 7",
         )));
@@ -57,9 +57,11 @@ async fn run_features(
         .with_warning("no bars found in warehouse; run `ferrotick cache load <symbol>` first"));
     }
 
-    let mut config = FeatureConfig::default();
-    config.window = args.window;
-    config.bb_period = args.window;
+    let config = FeatureConfig {
+        window: args.window,
+        bb_period: args.window,
+        ..FeatureConfig::default()
+    };
 
     let engineer = FeatureEngineer::new(config, indicators)
         .map_err(|err| CliError::Command(err.to_string()))?;

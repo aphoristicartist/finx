@@ -61,8 +61,8 @@ impl ModelMetrics {
     }
 }
 
-/// Perform k-fold cross-validation.
-pub fn cross_validate<F>(
+/// Perform forward-chaining time-series cross-validation.
+pub fn time_series_cross_validate<F>(
     dataset: &Dataset,
     k: usize,
     mut train_fn: F,
@@ -77,7 +77,7 @@ where
     }
 
     let total_rows = dataset.targets.len();
-    let fold_size = total_rows / k;
+    let fold_size = total_rows / (k + 1);
 
     if fold_size == 0 {
         return Err(MlError::NoData(String::from(
@@ -88,8 +88,8 @@ where
     let mut metrics = Vec::with_capacity(k);
 
     for fold in 0..k {
-        // Create test fold
-        let test_start = fold * fold_size;
+        // Walk-forward split: train is always before test.
+        let test_start = (fold + 1) * fold_size;
         let test_end = if fold == k - 1 {
             total_rows
         } else {
@@ -138,10 +138,7 @@ fn split_features(
 ) -> (ndarray::Array2<f64>, ndarray::Array2<f64>) {
     use ndarray::s;
 
-    let before = features.slice(s![..start, ..]).to_owned();
-    let after = features.slice(s![end.., ..]).to_owned();
-    let train = ndarray::concatenate![ndarray::Axis(0), before, after];
-
+    let train = features.slice(s![..start, ..]).to_owned();
     let test = features.slice(s![start..end, ..]).to_owned();
 
     (train, test)
@@ -154,20 +151,14 @@ fn split_targets(
 ) -> (ndarray::Array1<f64>, ndarray::Array1<f64>) {
     use ndarray::s;
 
-    let before = targets.slice(s![..start]).to_owned();
-    let after = targets.slice(s![end..]).to_owned();
-    let train = ndarray::concatenate![ndarray::Axis(0), before, after];
-
+    let train = targets.slice(s![..start]).to_owned();
     let test = targets.slice(s![start..end]).to_owned();
 
     (train, test)
 }
 
 fn split_timestamps(timestamps: &[String], start: usize, end: usize) -> (Vec<String>, Vec<String>) {
-    let mut train = Vec::new();
-    train.extend_from_slice(&timestamps[..start]);
-    train.extend_from_slice(&timestamps[end..]);
-
+    let train = timestamps[..start].to_vec();
     let test = timestamps[start..end].to_vec();
 
     (train, test)

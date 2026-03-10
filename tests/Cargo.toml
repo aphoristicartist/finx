@@ -6,6 +6,40 @@ edition = "2021"
 [lib]
 path = "lib.rs"
 
+[[test]]
+name = "integration_test"
+path = "integration_test.rs"
+
+[[test]]
+name = "multiasset_behavioral"
+path = "multiasset_behavioral.rs"
+
+[[test]]
+name = "integration_workflows"
+path = "integration_workflows.rs"
+
+[[test]]
+name = "edge_cases"
+path = "edge_cases.rs"
+
+[[test]]
+name = "mathematical_correctness"
+path = "mathematical_correctness.rs"
+
+[[test]]
+name = "state_management"
+path = "state_management.rs"
+
+[[test]]
+name = "error_handling_behavior"
+path = "error_handling_behavior.rs"
+
 [dependencies]
-ferrotick-core = { path = "../crates/ferrotick-core", features = ["ferrotick-warehouse"] }
+ferrotick-core = { path = "../crates/ferrotick-core" }
+ferrotick-strategies = { path = "../crates/ferrotick-strategies" }
+ferrotick-backtest = { path = "../crates/ferrotick-backtest" }
+ferrotick-ml = { path = "../crates/ferrotick-ml" }
+ferrotick-optimization = { path = "../crates/ferrotick-optimization" }
+ndarray = "0.15"
 tokio = { workspace = true }
+uuid = { workspace = true }
